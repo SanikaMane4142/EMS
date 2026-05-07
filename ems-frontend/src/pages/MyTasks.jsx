@@ -1,37 +1,33 @@
 import React, { useState, useEffect, useMemo } from "react";
 import {
-  Search, Grid, List, Plus, Filter, MoreVertical, Calendar,
-  ChevronRight, ChevronDown, CheckCircle2, Clock, AlertCircle,
-  ArrowLeft, Edit3, MessageSquare, Paperclip, Share2, GripVertical,
-  CheckCircle, Briefcase, ChevronUp, ChevronDown as ChevronDownIcon, ChevronLeft, Layout, Target,
-  Zap, Award, Check, PlayCircle
+  Search, Plus, MoreVertical, Calendar,
+  ChevronRight, Share2, GripVertical,
+  CheckCircle, Briefcase, ChevronUp, ChevronDown as ChevronDownIcon, Layout,
+  Zap, Check, PlayCircle, AlertCircle, SendHorizonal, ThumbsUp
 } from "lucide-react";
-import { Box, Chip, Avatar, LinearProgress, IconButton, Tooltip, Collapse, Menu, MenuItem, CircularProgress } from '@mui/material';
+import { Box, Avatar, IconButton, Collapse, Menu, MenuItem, CircularProgress, Skeleton } from '@mui/material';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  DragOverlay,
-  defaultDropAnimationSideEffects
+  DndContext, closestCenter, KeyboardSensor, PointerSensor,
+  useSensor, useSensors
 } from '@dnd-kit/core';
 import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
-  useSortable
+  arrayMove, SortableContext, sortableKeyboardCoordinates,
+  verticalListSortingStrategy, useSortable
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 
 import PageHeader from '../components/PageHeader';
-import { MOCK_TASKS, MOCK_EMPLOYEES } from '../utils/mockTasks';
 import CreateTaskModal from "../components/CreateTaskModal";
 import AddTaskModal from "../components/AddTaskModal";
+import { useAuth } from '../context/AuthContext';
+import { useMyTasks, useCreateTask, useToggleSubtask, useToggleGroup, useSubmitForReview, useMarkAsDone, useAddGroup, useAddSubtask } from '../hooks/useTasks';
+import { taskService } from '../services/taskService';
+import { notificationService } from '../services/notificationService';
+import { normalizeTask, TASK_STATUS_STYLES } from '../utils/taskUtils';
+
+/** Priority Badge Component */
 
 // --- Sub-components ---
 
@@ -50,14 +46,18 @@ const PriorityBadge = ({ priority }) => {
 };
 
 const StatusChip = ({ status }) => {
-  const styles = {
-    "In Progress": "bg-indigo-50 text-indigo-600 border-indigo-100",
-    "Done": "bg-emerald-50 text-emerald-600 border-emerald-100",
-    "Pending": "bg-slate-50 text-slate-500 border-slate-200",
+  const config = TASK_STATUS_STYLES[status] || { label: status, color: 'slate' };
+  const colorMap = {
+    indigo: "bg-indigo-50 text-indigo-600 border-indigo-100",
+    emerald: "bg-emerald-50 text-emerald-600 border-emerald-100",
+    amber: "bg-amber-50 text-amber-600 border-amber-100",
+    slate: "bg-slate-50 text-slate-500 border-slate-200",
+    red: "bg-red-50 text-red-600 border-red-100"
   };
+
   return (
-    <span className={`text-[10px] font-bold px-3 py-1 rounded-full border ${styles[status] || styles.Pending}`}>
-      {status}
+    <span className={`text-[10px] font-bold px-3 py-1 rounded-full border ${colorMap[config.color]}`}>
+      {config.label}
     </span>
   );
 };
@@ -106,8 +106,8 @@ const SortableTaskItem = ({ task, isActive, onClick }) => {
   );
 };
 
-const SortableSubtaskItem = ({ item, onToggle }) => {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
+const SortableSubtaskItem = ({ item, onToggle, canEdit = true }) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id, disabled: !canEdit });
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -121,9 +121,15 @@ const SortableSubtaskItem = ({ item, onToggle }) => {
       className={`flex items-center gap-4 py-2 px-4 transition-all group/item border-b border-slate-50/50 last:border-none ${item.isCompleted ? 'bg-emerald-50/40 hover:bg-emerald-50/60' : 'hover:bg-primary/5'
         }`}
     >
-      <div {...attributes} {...listeners} className="p-1 text-slate-200 cursor-grab active:cursor-grabbing opacity-0 group-hover/item:opacity-100 transition-opacity">
-        <GripVertical size={14} />
-      </div>
+      {canEdit ? (
+        <div {...attributes} {...listeners} className="p-1 text-slate-200 cursor-grab active:cursor-grabbing opacity-0 group-hover/item:opacity-100 transition-opacity">
+          <GripVertical size={14} />
+        </div>
+      ) : (
+        <div className="p-1 text-transparent">
+          <GripVertical size={14} />
+        </div>
+      )}
 
       <span className={`text-[12px] font-medium flex-1 tracking-tight transition-colors ${item.isCompleted ? 'text-emerald-700' : 'text-slate-700'
         }`}>
@@ -137,28 +143,31 @@ const SortableSubtaskItem = ({ item, onToggle }) => {
 
         <div className="w-[48px] flex justify-center">
           <button
+            disabled={!canEdit}
             onClick={() => onToggle(item.id)}
             className={`w-4.5 h-4.5 rounded flex items-center justify-center transition-all duration-300 ${item.isCompleted
               ? 'bg-emerald-500 text-white border-emerald-500 shadow-lg shadow-emerald-500/20'
               : 'bg-white border-2 border-slate-200 text-transparent hover:border-emerald-500 hover:bg-emerald-50'
-              }`}
+              } ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             <Check size={11} strokeWidth={3} className={`transition-transform duration-300 ${item.isCompleted ? 'scale-100' : 'scale-0'}`} />
           </button>
         </div>
 
         <div className="w-[28px]">
-          <IconButton size="small" className="opacity-0 group-hover/item:opacity-100 transition-opacity p-0.5">
-            <MoreVertical size={14} className="text-slate-300" />
-          </IconButton>
+          {canEdit && (
+            <IconButton size="small" className="opacity-0 group-hover/item:opacity-100 transition-opacity p-0.5">
+              <MoreVertical size={14} className="text-slate-300" />
+            </IconButton>
+          )}
         </div>
       </div>
     </div>
   );
 };
 
-const SortableGroup = ({ group, index, expanded, onToggle, onAddItem, isLast, onToggleGroup }) => {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: group.id });
+const SortableGroup = ({ group, index, expanded, onToggle, onAddItem, isLast, onToggleGroup, canEdit = true }) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: group.id, disabled: !canEdit });
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -166,16 +175,22 @@ const SortableGroup = ({ group, index, expanded, onToggle, onAddItem, isLast, on
     zIndex: isDragging ? 10 : 1
   };
 
-  const isGroupCompleted = group.items.every(i => i.isCompleted);
+  const isGroupCompleted = group.isCompleted;
 
   return (
     <div ref={setNodeRef} style={style} className={`transition-all bg-white ${!isLast ? 'border-b border-slate-100/50' : ''}`}>
       <div className="py-2.5 px-4 flex items-center justify-center bg-slate-50/30 group/header">
         <div className="w-full flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div {...attributes} {...listeners} className="p-1 text-slate-200 cursor-grab active:cursor-grabbing opacity-0 group-hover/header:opacity-100 transition-opacity">
-              <GripVertical size={14} />
-            </div>
+            {canEdit ? (
+              <div {...attributes} {...listeners} className="p-1 text-slate-200 cursor-grab active:cursor-grabbing opacity-0 group-hover/header:opacity-100 transition-opacity">
+                <GripVertical size={14} />
+              </div>
+            ) : (
+              <div className="p-1 text-transparent">
+                <GripVertical size={14} />
+              </div>
+            )}
             <div className="w-6 h-6 rounded bg-white text-primary border border-primary/10 flex items-center justify-center font-bold text-[10px]">
               {index + 1}
             </div>
@@ -185,22 +200,25 @@ const SortableGroup = ({ group, index, expanded, onToggle, onAddItem, isLast, on
           <div className="flex items-center justify-end">
             <div className="flex items-center gap-1 mr-4">
               <span className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.1em] px-2">{group.items.length} ITEMS</span>
-              <IconButton
-                size="small"
-                onClick={(e) => { e.stopPropagation(); onAddItem(group.id); }}
-                className="w-6 h-6 rounded text-slate-400 hover:text-primary hover:bg-primary/5 transition-all"
-              >
-                <Plus size={14} />
-              </IconButton>
+              {canEdit && (
+                <IconButton
+                  size="small"
+                  onClick={(e) => { e.stopPropagation(); onAddItem(group.id); }}
+                  className="w-6 h-6 rounded text-slate-400 hover:text-primary hover:bg-primary/5 transition-all"
+                >
+                  <Plus size={14} />
+                </IconButton>
+              )}
             </div>
 
             <div className="w-[48px] flex justify-center">
               <button
+                disabled={!canEdit}
                 onClick={(e) => { e.stopPropagation(); onToggleGroup(group.id, !isGroupCompleted); }}
                 className={`w-4.5 h-4.5 rounded flex items-center justify-center transition-all duration-300 ${isGroupCompleted
                   ? 'bg-emerald-500 text-white border-emerald-500 shadow-lg shadow-emerald-500/20'
                   : 'bg-white border-2 border-slate-200 text-transparent hover:border-emerald-500 hover:bg-emerald-50'
-                  }`}
+                  } ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 <Check size={11} strokeWidth={3} className={`transition-transform duration-300 ${isGroupCompleted ? 'scale-100' : 'scale-0'}`} />
               </button>
@@ -223,7 +241,7 @@ const SortableGroup = ({ group, index, expanded, onToggle, onAddItem, isLast, on
         <div className="bg-white pl-8">
           <SortableContext items={group.items.map(i => i.id)} strategy={verticalListSortingStrategy}>
             {group.items.map(item => (
-              <SortableSubtaskItem key={item.id} item={item} onToggle={(id) => onToggleGroup(group.id, id)} />
+              <SortableSubtaskItem key={item.id} item={item} onToggle={(id) => onToggleGroup(group.id, id)} canEdit={canEdit} />
             ))}
           </SortableContext>
         </div>
@@ -234,7 +252,7 @@ const SortableGroup = ({ group, index, expanded, onToggle, onAddItem, isLast, on
 
 // --- Main Components ---
 
-const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask }) => {
+const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, currentUserId, onSubmitReview, onMarkDone }) => {
   const [tasks, setTasks] = useState(allTasks);
   const [taskGroups, setTaskGroups] = useState(activeTask.subtaskGroups || []);
   const [expandedGroups, setExpandedGroups] = useState(activeTask.subtaskGroups?.map(g => g.id) || []);
@@ -242,27 +260,33 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask }
   const [isAddGroupModalOpen, setAddGroupModalOpen] = useState(false);
   const [addingToGroupId, setAddingToGroupId] = useState(null);
 
-  const handleCreateGroupOrItem = (data) => {
+  // Real mutations
+  const toggleSubtask = useToggleSubtask();
+  const toggleGroupMutation = useToggleGroup();
+  const addGroupMutation = useAddGroup();
+  const addSubtaskMutation = useAddSubtask();
+
+  // Derived state for workflow buttons
+  const isAssignee = activeTask.assigned_to === currentUserId;
+  const isAssigner = activeTask.assigned_by === currentUserId;
+  const canEdit = isAssignee || (isAssigner && !activeTask.is_acknowledged);
+  const allDone = taskService.allSubtasksDone(taskGroups);
+  const canSubmitReview = isAssignee && allDone && activeTask.status === 'in_progress';
+  const canMarkDone = isAssigner && activeTask.status === 'review';
+
+  const handleCreateGroupOrItem = async (data) => {
     if (addingToGroupId) {
-      const newItem = {
-        id: `item-${Date.now()}`,
+      // Add real subtask to DB
+      await addSubtaskMutation.mutateAsync({
+        groupId: addingToGroupId,
         title: data.name,
-        date: data.dueDate ? new Date(data.dueDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : "No Date",
-        isCompleted: data.status === 'Completed'
-      };
-      setTaskGroups(prev => prev.map(group => 
-        group.id === addingToGroupId ? { ...group, items: [...group.items, newItem] } : group
-      ));
+        dueDate: data.dueDate || null,
+      });
       setAddingToGroupId(null);
       setAddGroupModalOpen(false);
     } else {
-      const newGroup = {
-        id: `group-${Date.now()}`,
-        title: data.name,
-        items: []
-      };
-      setTaskGroups(prev => [...prev, newGroup]);
-      setExpandedGroups(prev => [...prev, newGroup.id]);
+      // Add real group to DB
+      await addGroupMutation.mutateAsync({ taskId: activeTask.id, title: data.name });
       setAddGroupModalOpen(false);
     }
   };
@@ -277,25 +301,60 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask }
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  const handleToggleGroupStatus = (groupId, itemIdOrStatus) => {
-    setTaskGroups(prev => prev.map(group => {
-      if (group.id === groupId) {
-        if (typeof itemIdOrStatus === 'string') {
-          return {
-            ...group,
-            items: group.items.map(item =>
-              item.id === itemIdOrStatus ? { ...item, isCompleted: !item.isCompleted } : item
-            )
-          };
-        } else {
-          return {
-            ...group,
-            items: group.items.map(item => ({ ...item, isCompleted: itemIdOrStatus }))
-          };
-        }
+  // Optimistic toggle: update local state immediately, then persist
+  const handleToggleGroupStatus = async (groupId, itemIdOrStatus) => {
+    if (typeof itemIdOrStatus === 'string') {
+      // Individual subtask toggle (MINI TASKS)
+      const subtaskId = itemIdOrStatus;
+      const group = taskGroups.find(g => g.id === groupId);
+      const item = group?.items.find(i => i.id === subtaskId);
+      if (!item) return;
+
+      // Optimistic update - strictly manual, no group auto-ticking
+      setTaskGroups(prev => prev.map(g =>
+        g.id === groupId
+          ? { ...g, items: g.items.map(i => i.id === subtaskId ? { ...i, isCompleted: !i.isCompleted } : i) }
+          : g
+      ));
+
+      // Persist subtask status
+      try {
+        await toggleSubtask.mutateAsync({ subtaskId, isCompleted: !item.isCompleted });
+      } catch {
+        // Rollback
+        setTaskGroups(prev => prev.map(g =>
+          g.id === groupId
+            ? { ...g, items: g.items.map(i => i.id === subtaskId ? { ...i, isCompleted: item.isCompleted } : i) }
+            : g
+        ));
       }
-      return group;
-    }));
+    } else {
+      // Group-level toggle (SUBTASKS - manual only)
+      const newCompleted = itemIdOrStatus;
+      const group = taskGroups.find(g => g.id === groupId);
+      if (!group) return;
+      
+      // Calculate new progress based on groups
+      const updatedGroups = taskGroups.map(g =>
+        g.id === groupId ? { ...g, isCompleted: newCompleted } : g
+      );
+      const newProgress = taskService.calcProgress(updatedGroups);
+
+      // Optimistic update
+      setTaskGroups(updatedGroups);
+      
+      try {
+        // 1. Persist group status
+        await toggleGroupMutation.mutateAsync({ groupId, isCompleted: newCompleted });
+        // 2. Update overall task progress
+        await taskService.updateTask(activeTask.id, { progress: newProgress }, currentUserId, 'progress_updated');
+      } catch (err) {
+        // Rollback
+        setTaskGroups(prev => prev.map(g =>
+          g.id === groupId ? { ...g, isCompleted: !newCompleted } : g
+        ));
+      }
+    }
   };
 
   const handleDragEnd = (event) => {
@@ -361,8 +420,8 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask }
             anchorEl={switcherAnchor}
             open={Boolean(switcherAnchor)}
             onClose={() => setSwitcherAnchor(null)}
-            PaperProps={{
-              sx: { width: 240, mt: 0.5, borderRadius: '12px', p: 0.75, boxShadow: 'var(--shadow-premium)', border: '1px solid var(--border-light)' }
+            slotProps={{
+              paper: { sx: { width: 240, mt: 0.5, borderRadius: '12px', p: 0.75, boxShadow: 'var(--shadow-premium)', border: '1px solid var(--border-light)' } }
             }}
           >
             <SortableContext items={tasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
@@ -443,10 +502,25 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask }
 
               {/* Vertical Dividers + Metadata Chips */}
               <div className="flex items-center gap-8 h-10 pr-2">
-                {/* Assignee */}
-                <div className="flex items-center gap-3">
-                  <Avatar sx={{ width: 28, height: 28, bgcolor: 'var(--primary-light)', color: 'var(--primary)', fontWeight: 700, fontSize: 10 }}>{activeTask.assignedTo.charAt(0)}</Avatar>
-                  <span className="text-[11px] font-bold text-slate-900">{activeTask.assignedTo}</span>
+                {/* Assignee & Assigner Context */}
+                <div className="flex items-center gap-6">
+                  <div className="flex flex-col">
+                    <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Assignee</span>
+                    <div className="flex items-center gap-2">
+                      <Avatar sx={{ width: 22, height: 22, bgcolor: 'var(--primary-light)', color: 'var(--primary)', fontWeight: 800, fontSize: 9 }}>{(activeTask.assignedToName || 'U').charAt(0)}</Avatar>
+                      <span className="text-[11px] font-bold text-slate-900">{activeTask.assignedToName}</span>
+                    </div>
+                  </div>
+                  
+                  <div className="w-px h-8 bg-slate-100"></div>
+                  
+                  <div className="flex flex-col">
+                    <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Assigned By</span>
+                    <div className="flex items-center gap-2">
+                      <Avatar sx={{ width: 22, height: 22, bgcolor: 'var(--emerald-50)', color: 'var(--emerald-600)', fontWeight: 800, fontSize: 9 }}>{(activeTask.assignedByName || 'S').charAt(0)}</Avatar>
+                      <span className="text-[11px] font-bold text-slate-900">{activeTask.assignedByName}</span>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="w-px h-6 bg-slate-100"></div>
@@ -455,8 +529,12 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask }
                 <div className="flex items-center gap-2.5">
                   <Calendar size={16} className="text-slate-400" />
                   <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-bold text-slate-900 whitespace-nowrap">{activeTask.deadline}</span>
-                    <span className="text-[8px] font-bold px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded uppercase tracking-tighter">3D LEFT</span>
+                    <span className="text-[11px] font-bold text-slate-900 whitespace-nowrap">
+                      {activeTask.deadline ? new Date(activeTask.deadline).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' }) : 'No deadline'}
+                    </span>
+                    {activeTask.deadline && new Date(activeTask.deadline) < new Date() && activeTask.status !== 'done' && (
+                      <span className="text-[8px] font-bold px-1.5 py-0.5 bg-red-100 text-red-500 rounded uppercase tracking-tighter">Overdue</span>
+                    )}
                   </div>
                 </div>
 
@@ -475,12 +553,14 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask }
             <div className="flex flex-col gap-3.5">
               <div className="flex items-center justify-between px-1">
                 <h3 className="text-sm font-bold text-slate-900 tracking-tight">Task Breakdown</h3>
-                <button 
-                  onClick={() => setAddGroupModalOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-1 bg-primary/5 text-primary hover:bg-primary hover:text-white transition-all rounded-full text-[10px] font-bold border border-primary/10"
-                >
-                  <Plus size={12} /> Add Task
-                </button>
+                {canEdit && (
+                  <button 
+                    onClick={() => setAddGroupModalOpen(true)}
+                    className="flex items-center gap-1.5 px-3 py-1 bg-primary/5 text-primary hover:bg-primary hover:text-white transition-all rounded-full text-[10px] font-bold border border-primary/10"
+                  >
+                    <Plus size={12} /> Add Task
+                  </button>
+                )}
               </div>
 
               <div className="bg-white rounded-[24px] border border-slate-100 shadow-sm overflow-hidden">
@@ -505,16 +585,19 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask }
                         onAddItem={(id) => { setAddingToGroupId(id); setAddGroupModalOpen(true); }}
                         isLast={idx === taskGroups.length - 1}
                         onToggleGroup={handleToggleGroupStatus}
+                        canEdit={canEdit}
                       />
                     ))}
                   </SortableContext>
                 </div>
               </div>
 
-              <div className="py-2.5 rounded-[12px] border border-dashed border-slate-200/50 bg-slate-50/20 flex items-center justify-center gap-2.5 text-slate-300 transition-all">
-                <Share2 size={14} />
-                <span className="text-[9px] font-bold uppercase tracking-[0.15em]">Drag and reorder any group or row</span>
-              </div>
+              {canEdit && (
+                <div className="py-2.5 rounded-[12px] border border-dashed border-slate-200/50 bg-slate-50/20 flex items-center justify-center gap-2.5 text-slate-300 transition-all">
+                  <Share2 size={14} />
+                  <span className="text-[9px] font-bold uppercase tracking-[0.15em]">Drag and reorder any group or row</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -533,7 +616,7 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask }
 };
 
 // --- View 1: Task Grid ---
-const TaskGrid = ({ tasks, onTaskClick }) => {
+const TaskGrid = ({ tasks, onTaskClick, currentUserId, onSubmitReview, onMarkDone }) => {
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -541,7 +624,11 @@ const TaskGrid = ({ tasks, onTaskClick }) => {
       exit={{ opacity: 0, y: -20 }}
       className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6"
     >
-      {tasks.map((task) => (
+      {tasks.map((task) => {
+        const isOverdue = task.deadline && new Date(task.deadline) < new Date() && task.status !== 'done';
+        const isAssigner = task.assigned_by === currentUserId;
+        const isAssignee = task.assigned_to === currentUserId;
+        return (
         <div
           key={task.id}
           onClick={() => onTaskClick(task)}
@@ -565,7 +652,12 @@ const TaskGrid = ({ tasks, onTaskClick }) => {
 
           <div className="flex items-center gap-2 mb-5 text-[10px] font-medium text-slate-400">
             <Calendar size={12} />
-            <span>Due {new Date(task.deadline).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
+            <span>
+              {task.deadline
+                ? `Due ${new Date(task.deadline).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`
+                : 'No deadline'}
+            </span>
+            {isOverdue && <span className="text-red-400 font-bold">· Overdue</span>}
           </div>
 
           <div className="mb-8">
@@ -587,63 +679,177 @@ const TaskGrid = ({ tasks, onTaskClick }) => {
             </div>
           </div>
 
-          <div className="mt-8 flex justify-center border-t border-slate-50 pt-6">
-            <StatusChip status={task.status} />
+          <div className="mt-8 border-t border-slate-50 pt-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  {isAssignee ? (
+                    <>
+                      <Avatar 
+                        sx={{ 
+                          width: 24, height: 24, 
+                          fontSize: 10, fontWeight: 800,
+                          bgcolor: 'var(--emerald-50)',
+                          color: 'var(--emerald-600)'
+                        }}
+                      >
+                        {task.assignedByName ? task.assignedByName.charAt(0) : 'S'}
+                      </Avatar>
+                      <div className="flex flex-col">
+                        <span className="text-[9px] font-bold text-slate-900 leading-none mb-0.5">{task.assignedByName}</span>
+                        <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter leading-none">Assigner</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <Avatar 
+                        sx={{ 
+                          width: 24, height: 24, 
+                          fontSize: 10, fontWeight: 800,
+                          bgcolor: 'var(--primary-light)',
+                          color: 'var(--primary)'
+                        }}
+                      >
+                        {task.assignedToName ? task.assignedToName.charAt(0) : 'U'}
+                      </Avatar>
+                      <div className="flex flex-col">
+                        <span className="text-[9px] font-bold text-slate-900 leading-none mb-0.5">{task.assignedToName}</span>
+                        <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter leading-none">{task.departmentName}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+                <StatusChip status={task.status} />
+              </div>
+            
+            <div className="flex flex-col gap-2">
+            {isAssignee && task.status === 'in_progress' && (
+              <button
+                onClick={e => { e.stopPropagation(); onSubmitReview(task); }}
+                className="w-full flex items-center justify-center gap-1.5 py-2 text-[10px] font-bold text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+              >
+                <SendHorizonal size={11} /> Submit for Review
+              </button>
+            )}
+            {isAssigner && task.status === 'review' && (
+              <button
+                onClick={e => { e.stopPropagation(); onMarkDone(task); }}
+                className="w-full flex items-center justify-center gap-1.5 py-2 text-[10px] font-bold text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+              >
+                <ThumbsUp size={11} /> Approve & Done
+              </button>
+            )}
+            {task.status === 'review' && !isAssigner && (
+              <p className="text-center text-[9px] text-amber-500 font-bold">⏳ In Review</p>
+            )}
+            </div>
           </div>
         </div>
-      ))}
+        );
+      })}
     </motion.div>
   );
 };
 
+// --- Loading Skeleton ---
+const TaskSkeleton = () => (
+  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+    {[1,2,3,4].map(i => (
+      <div key={i} className="bg-white rounded-[32px] p-8 border border-slate-100">
+        <Skeleton variant="rounded" width={56} height={56} sx={{ borderRadius: 3, mb: 3 }} />
+        <Skeleton variant="text" width="80%" height={24} sx={{ mb: 1 }} />
+        <Skeleton variant="text" width="50%" height={16} sx={{ mb: 4 }} />
+        <Skeleton variant="rounded" height={4} />
+      </div>
+    ))}
+  </div>
+);
+
 // --- Main Page Component ---
 const MyTasks = () => {
-  const [view, setView] = useState("grid"); // "grid" or "workspace"
+  const { user, profile } = useAuth();
+  const [view, setView] = useState('grid');
   const [activeTask, setActiveTask] = useState(null);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState('');
   const [isModalOpen, setModalOpen] = useState(false);
-  const [tasks, setTasks] = useState(MOCK_TASKS);
 
-  const handleCreateTask = (newTaskData) => {
-    const newTask = {
-      ...newTaskData,
-      id: `task-${Date.now()}`,
-      projectName: "New Project", // Default for now
-      assignedTo: "Me",
-      progress: 0,
-      status: "Todo",
-      priority: "Medium",
-      subtaskGroups: []
-    };
-    setTasks(prev => [newTask, ...prev]);
+  // ── Real data ──
+  const { data: rawTasks = [], isLoading, error: fetchError } = useMyTasks(user?.id);
+  const tasks = useMemo(() => {
+    if (fetchError) {
+      console.error('Task fetch error:', fetchError);
+      return [];
+    }
+    return rawTasks.map(normalizeTask);
+  }, [rawTasks, fetchError]);
+
+  // ── Mutations ──
+  const createTask   = useCreateTask();
+  const submitReview = useSubmitForReview();
+  const markDone     = useMarkAsDone();
+
+  // Keep activeTask in sync after refetch
+  useEffect(() => {
+    if (activeTask && tasks.length) {
+      const updated = tasks.find(t => t.id === activeTask.id);
+      if (updated) setActiveTask(updated);
+    }
+  }, [tasks]);
+
+  const handleCreateTask = async (payload) => {
+    const task = await createTask.mutateAsync(payload);
+    // Notify assignee if different from creator
+    if (payload.assignedTo !== user.id) {
+      try {
+        await notificationService.notifyUser?.(
+          payload.assignedTo,
+          'New Task Assigned',
+          `${profile?.full_name || 'Someone'} assigned you: "${payload.title}"`,
+          'task',
+          '/my-tasks'
+        );
+      } catch (_) { /* non-critical */ }
+    }
   };
+
+  const handleSubmitForReview = async (task) => {
+    await submitReview.mutateAsync({ taskId: task.id, actorId: user.id, oldStatus: task.status });
+    // Notify the assigner
+    if (task.assigned_by && task.assigned_by !== user.id) {
+      try {
+        await notificationService.notifyUser?.(
+          task.assigned_by,
+          'Task Ready for Review',
+          `${profile?.full_name} completed "${task.title}" — please review.`,
+          'task',
+          '/my-tasks'
+        );
+      } catch (_) { /* non-critical */ }
+    }
+  };
+
+  const handleMarkDone = (task) =>
+    markDone.mutateAsync({ taskId: task.id, actorId: user.id, oldStatus: task.status });
 
   const handleTaskClick = (task) => {
     setActiveTask(task);
-    setView("workspace");
+    setView('workspace');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    // Acknowledge if assignee opens it for the first time
+    if (!task.is_acknowledged && task.assigned_to === user?.id) {
+      taskService.acknowledgeTask(task.id, user.id);
+    }
   };
 
-  const handleBack = () => {
-    setView("grid");
-    setActiveTask(null);
-  };
-
-  const filteredTasks = tasks.filter(task =>
-    task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    task.projectName.toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredTasks = tasks.filter(t =>
+    t.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    t.project_name?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
     <div className="pb-20">
       <AnimatePresence mode="wait">
-        {view === "grid" ? (
-          <motion.div
-            key="grid"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
+        {view === 'grid' ? (
+          <motion.div key="grid" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <PageHeader title="Tasks Center" subtitle="Track and manage your professional goals.">
               <div className="flex flex-wrap gap-4">
                 <div className="relative w-full sm:w-80">
@@ -652,10 +858,9 @@ const MyTasks = () => {
                     className="w-full h-12 pl-12 pr-4 bg-white border border-slate-100 rounded-2xl text-sm font-medium shadow-sm focus:outline-none focus:ring-4 focus:ring-primary/5 focus:border-primary transition-all"
                     placeholder="Search tasks..."
                     value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onChange={e => setSearchQuery(e.target.value)}
                   />
                 </div>
-
                 <button
                   onClick={() => setModalOpen(true)}
                   className="btn-ems btn-ems-primary h-12 rounded-2xl px-8 shadow-xl shadow-primary/20 text-xs font-bold"
@@ -665,24 +870,56 @@ const MyTasks = () => {
               </div>
             </PageHeader>
 
-            <TaskGrid tasks={filteredTasks} onTaskClick={handleTaskClick} />
+            {isLoading ? <TaskSkeleton /> : fetchError ? (
+              <div className="flex flex-col items-center justify-center py-24 text-red-500">
+                <AlertCircle size={48} className="mb-4 opacity-50" />
+                <p className="text-sm font-bold">Failed to load tasks</p>
+                <p className="text-xs mt-1 text-slate-400">Please ensure the database schema is up to date.</p>
+                <button 
+                  onClick={() => window.location.reload()}
+                  className="mt-6 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all"
+                >
+                  Retry Connection
+                </button>
+              </div>
+            ) : filteredTasks.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-24 text-slate-400">
+                <CheckCircle size={48} className="mb-4 opacity-20" />
+                <p className="text-sm font-bold">No tasks yet</p>
+                <p className="text-xs mt-1">Create your first task or wait for an assignment</p>
+              </div>
+            ) : (
+              <TaskGrid
+                tasks={filteredTasks}
+                onTaskClick={handleTaskClick}
+                currentUserId={user?.id}
+                onSubmitReview={handleSubmitForReview}
+                onMarkDone={handleMarkDone}
+              />
+            )}
           </motion.div>
         ) : (
-          <TaskWorkspace
-            key="workspace"
-            activeTask={activeTask}
-            allTasks={tasks}
-            onTaskSelect={(task) => setActiveTask(task)}
-            onBack={handleBack}
-            onAddTask={() => setModalOpen(true)}
-          />
+          activeTask && (
+            <TaskWorkspace
+              key="workspace"
+              activeTask={activeTask}
+              allTasks={tasks}
+              onTaskSelect={t => { setActiveTask(t); handleTaskClick(t); }}
+              onBack={() => { setView('grid'); setActiveTask(null); }}
+              onAddTask={() => setModalOpen(true)}
+              currentUserId={user?.id}
+              onSubmitReview={handleSubmitForReview}
+              onMarkDone={handleMarkDone}
+            />
+          )
         )}
       </AnimatePresence>
 
-      <AddTaskModal
+      <CreateTaskModal
         open={isModalOpen}
         onClose={() => setModalOpen(false)}
         onCreate={handleCreateTask}
+        isSubmitting={createTask.isPending}
       />
     </div>
   );

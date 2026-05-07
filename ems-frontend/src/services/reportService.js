@@ -84,7 +84,7 @@ export const reportService = {
           profiles!user_id (
             full_name,
             email,
-            departments!department_id (name)
+            departments!profiles_department_id_fkey (name)
           )
         `)
         .order('report_date', { ascending: false })
@@ -99,7 +99,7 @@ export const reportService = {
             profiles (
               full_name,
               email,
-              departments!department_id (name)
+              departments!profiles_department_id_fkey (name)
             )
           `)
           .order('report_date', { ascending: false })
@@ -130,7 +130,7 @@ export const reportService = {
           profiles!user_id (
             full_name,
             email,
-            departments!department_id (name)
+            departments!profiles_department_id_fkey (name)
           )
         `)
         .eq('report_date', date)
@@ -144,7 +144,7 @@ export const reportService = {
             profiles (
               full_name,
               email,
-              departments!department_id (name)
+              departments!profiles_department_id_fkey (name)
             )
           `)
           .eq('report_date', date)
@@ -192,7 +192,7 @@ export const reportService = {
           profiles!user_id (
             full_name,
             email,
-            departments!department_id (name)
+            departments!profiles_department_id_fkey (name)
           )
         `)
         .eq('report_date', today)
@@ -206,7 +206,7 @@ export const reportService = {
             profiles (
               full_name,
               email,
-              departments!department_id (name)
+              departments!profiles_department_id_fkey (name)
             )
           `)
           .eq('report_date', today)

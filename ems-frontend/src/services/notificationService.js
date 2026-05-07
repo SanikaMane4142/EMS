@@ -81,5 +81,25 @@ export const notificationService = {
       throw notifError;
     }
     console.log('notifyAdmins: Notifications sent successfully');
+  },
+
+  /**
+   * Send a notification to a specific user
+   */
+  async notifyUser(userId, title, message, type = 'info', link = null) {
+    const { error } = await supabase
+      .from('notifications')
+      .insert({
+        user_id: userId,
+        title,
+        message,
+        type,
+        link
+      });
+
+    if (error) {
+      console.error('notifyUser: Error sending notification:', error);
+      throw error;
+    }
   }
 };

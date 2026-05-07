@@ -19,7 +19,7 @@ export const profileService = {
 
     const { data, error } = await supabase
       .from('profiles')
-      .select('*, departments!department_id(id, name)')
+      .select('*, departments!profiles_department_id_fkey(id, name)')
       .eq('id', user.id)
       .single();
 
@@ -34,7 +34,7 @@ export const profileService = {
     if (!id) return null;
     const { data, error } = await supabase
       .from('profiles')
-      .select('*, departments!department_id(id, name)')
+      .select('*, departments!profiles_department_id_fkey(id, name)')
       .eq('id', id)
       .single();
 
@@ -63,7 +63,7 @@ export const profileService = {
   async getAllEmployees() {
     const { data, error } = await supabase
       .from('profiles')
-      .select('*, departments!department_id(id, name)')
+      .select('*, departments!profiles_department_id_fkey(id, name)')
       .order('full_name');
 
     if (error) throw error;
@@ -92,7 +92,7 @@ export const profileService = {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('full_name, birthday, designation, departments!department_id(name)')
+        .select('full_name, birthday, designation, departments!profiles_department_id_fkey(name)')
         .not('birthday', 'is', null)
         .order('birthday');
 
@@ -124,7 +124,7 @@ export const profileService = {
       // Try with joined_at first
       let { data, error } = await supabase
         .from('profiles')
-        .select('id, full_name, email, designation, joined_at, created_at, departments!department_id(name)')
+        .select('id, full_name, email, designation, joined_at, created_at, departments!profiles_department_id_fkey(name)')
         .order('created_at', { ascending: false })
         .limit(limit);
 
@@ -133,7 +133,7 @@ export const profileService = {
         console.warn('joined_at missing, falling back to created_at');
         const { data: fallback, error: fallErr } = await supabase
           .from('profiles')
-          .select('id, full_name, email, designation, created_at, departments!department_id(name)')
+          .select('id, full_name, email, designation, created_at, departments!profiles_department_id_fkey(name)')
           .order('created_at', { ascending: false })
           .limit(limit);
         

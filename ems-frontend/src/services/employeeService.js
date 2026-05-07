@@ -9,7 +9,7 @@ export const employeeService = {
       .from('profiles')
       .select(`
         *,
-        departments!department_id (name)
+        departments!profiles_department_id_fkey (name)
       `)
       .order('full_name');
 

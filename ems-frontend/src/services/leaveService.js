@@ -69,7 +69,7 @@ export const leaveService = {
       .from('leave_requests')
       .select(`
         *,
-        profiles:profiles!user_id(id, full_name, email, department_id, departments!department_id(name)),
+        profiles:profiles!user_id(id, full_name, email, department_id, departments!profiles_department_id_fkey(name)),
         hr:profiles!hr_id(id, full_name),
         super_admin:profiles!super_admin_id(id, full_name)
       `)

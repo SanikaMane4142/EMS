@@ -439,6 +439,165 @@ CREATE POLICY "notifications_any_insert"   ON public.notifications FOR INSERT TO
 
 
 -- =============================================================================
--- SECTION 6: SCHEMA CACHE REFRESH
+-- SECTION 6: TASK MANAGEMENT MODULE
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- 6.1  TASKS
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.tasks (
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    title           TEXT        NOT NULL,
+    description     TEXT,
+    project_name    TEXT,
+    assigned_to     UUID        REFERENCES public.profiles(id) ON DELETE SET NULL,
+    assigned_by     UUID        REFERENCES public.profiles(id) ON DELETE SET NULL,
+    last_updated_by UUID        REFERENCES public.profiles(id) ON DELETE SET NULL,
+    department_id   UUID        REFERENCES public.departments(id) ON DELETE SET NULL,
+    priority        TEXT        DEFAULT 'Medium'
+                                CHECK (priority IN ('Low', 'Medium', 'High', 'Critical')),
+    status          TEXT        DEFAULT 'pending'
+                                CHECK (status IN ('pending', 'in_progress', 'review', 'done', 'cancelled')),
+    progress        INTEGER     DEFAULT 0 CHECK (progress BETWEEN 0 AND 100),
+    deadline        DATE,
+    is_acknowledged BOOLEAN     DEFAULT FALSE,
+    acknowledged_at TIMESTAMPTZ,
+    sort_order      INTEGER     DEFAULT 0,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- -----------------------------------------------------------------------------
+-- 6.2  TASK GROUPS  (subtask sections inside a task)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.task_groups (
+    id         UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+    task_id    UUID    NOT NULL REFERENCES public.tasks(id) ON DELETE CASCADE,
+    title      TEXT    NOT NULL,
+    is_completed BOOLEAN DEFAULT FALSE,
+    sort_order INTEGER DEFAULT 0
+);
+
+-- -----------------------------------------------------------------------------
+-- 6.3  SUBTASKS
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.subtasks (
+    id           UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+    group_id     UUID    NOT NULL REFERENCES public.task_groups(id) ON DELETE CASCADE,
+    title        TEXT    NOT NULL,
+    is_completed BOOLEAN DEFAULT FALSE,
+    due_date     DATE,
+    sort_order   INTEGER DEFAULT 0
+);
+
+-- -----------------------------------------------------------------------------
+-- 6.4  TASK ACTIVITY LOGS  (lightweight audit trail)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.task_activity_logs (
+    id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    task_id     UUID        REFERENCES public.tasks(id) ON DELETE CASCADE,
+    actor_id    UUID        REFERENCES public.profiles(id) ON DELETE SET NULL,
+    action_type TEXT        NOT NULL,
+    old_value   JSONB,
+    new_value   JSONB,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- -----------------------------------------------------------------------------
+-- 6.5  TASK COMMENTS  (Phase 2 — schema ready now)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.task_comments (
+    id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    task_id    UUID        NOT NULL REFERENCES public.tasks(id) ON DELETE CASCADE,
+    author_id  UUID        REFERENCES public.profiles(id) ON DELETE SET NULL,
+    message    TEXT        NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Trigger: tasks.updated_at
+DROP TRIGGER IF EXISTS trg_tasks_updated_at ON public.tasks;
+CREATE TRIGGER trg_tasks_updated_at
+    BEFORE UPDATE ON public.tasks
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+-- Realtime for tasks
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'tasks') THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.tasks;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'subtasks') THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.subtasks;
+    END IF;
+END $$;
+
+-- RLS
+ALTER TABLE public.tasks              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.task_groups        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.subtasks           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.task_activity_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.task_comments      ENABLE ROW LEVEL SECURITY;
+
+-- Tasks: employees see tasks they are assigned to OR created
+DROP POLICY IF EXISTS "tasks_assignee_view" ON public.tasks;
+CREATE POLICY "tasks_assignee_view" ON public.tasks FOR SELECT TO authenticated
+    USING (assigned_to = auth.uid() OR assigned_by = auth.uid());
+
+-- Tasks: anyone can create (employee self-task or cross-assignment)
+DROP POLICY IF EXISTS "tasks_any_insert" ON public.tasks;
+CREATE POLICY "tasks_any_insert" ON public.tasks FOR INSERT TO authenticated
+    WITH CHECK (assigned_by = auth.uid());
+
+-- Tasks: assignee updates their own tasks; assigner updates tasks they created
+DROP POLICY IF EXISTS "tasks_participant_update" ON public.tasks;
+CREATE POLICY "tasks_participant_update" ON public.tasks FOR UPDATE TO authenticated
+    USING (assigned_to = auth.uid() OR assigned_by = auth.uid());
+
+-- Tasks: HR/Admin full access
+DROP POLICY IF EXISTS "tasks_hr_all" ON public.tasks;
+CREATE POLICY "tasks_hr_all" ON public.tasks FOR ALL TO authenticated
+    USING (get_my_role() IN ('hr', 'admin', 'super_admin'));
+
+-- Groups + Subtasks: access if user has access to the parent task
+DROP POLICY IF EXISTS "groups_task_access" ON public.task_groups;
+CREATE POLICY "groups_task_access" ON public.task_groups FOR ALL TO authenticated
+    USING (EXISTS (
+        SELECT 1 FROM public.tasks t WHERE t.id = task_id
+        AND (t.assigned_to = auth.uid() OR t.assigned_by = auth.uid()
+             OR get_my_role() IN ('hr','admin','super_admin'))
+    ));
+
+DROP POLICY IF EXISTS "subtasks_group_access" ON public.subtasks;
+CREATE POLICY "subtasks_group_access" ON public.subtasks FOR ALL TO authenticated
+    USING (EXISTS (
+        SELECT 1 FROM public.task_groups tg
+        JOIN public.tasks t ON tg.task_id = t.id
+        WHERE tg.id = group_id
+        AND (t.assigned_to = auth.uid() OR t.assigned_by = auth.uid()
+             OR get_my_role() IN ('hr','admin','super_admin'))
+    ));
+
+-- Logs: HR can read; any participant can insert
+DROP POLICY IF EXISTS "logs_hr_view" ON public.task_activity_logs;
+CREATE POLICY "logs_hr_view" ON public.task_activity_logs FOR SELECT TO authenticated
+    USING (get_my_role() IN ('hr', 'admin', 'super_admin'));
+
+DROP POLICY IF EXISTS "logs_self_insert" ON public.task_activity_logs;
+CREATE POLICY "logs_self_insert" ON public.task_activity_logs FOR INSERT TO authenticated
+    WITH CHECK (actor_id = auth.uid());
+
+-- Comments: same access as task
+DROP POLICY IF EXISTS "comments_task_access" ON public.task_comments;
+CREATE POLICY "comments_task_access" ON public.task_comments FOR ALL TO authenticated
+    USING (EXISTS (
+        SELECT 1 FROM public.tasks t WHERE t.id = task_id
+        AND (t.assigned_to = auth.uid() OR t.assigned_by = auth.uid()
+             OR get_my_role() IN ('hr','admin','super_admin'))
+    ));
+
+
+-- =============================================================================
+-- SECTION 7: SCHEMA CACHE REFRESH
 -- =============================================================================
 NOTIFY pgrst, 'reload schema';
+

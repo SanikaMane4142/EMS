@@ -105,10 +105,13 @@ const Layout = ({ children }) => {
     });
 
     if (result.isConfirmed) {
-      await logout();
-      // Use window.location for a hard redirect — guarantees clean state
-      // even if the component unmounts before navigate() can execute.
-      window.location.href = '/login';
+      try {
+        await logout();
+        navigate('/login', { replace: true });
+      } catch (err) {
+        console.error('Logout failed:', err);
+        window.location.href = '/login';
+      }
     }
   };
 
