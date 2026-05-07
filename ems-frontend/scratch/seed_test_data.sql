@@ -33,3 +33,4 @@ INSERT INTO public.subtasks (group_id, title, is_completed)
 SELECT id, 'Check MyTasks visibility', false FROM new_group;
 
 SELECT 'Test data seeded successfully' as status;
+
