@@ -3,6 +3,9 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { AuthProvider } from './context/AuthContext';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from './lib/queryClient';
+import { GlobalErrorBoundary } from './components/GlobalErrorBoundary';
 
 // Pages
 import Login from './pages/Login';
@@ -68,10 +71,12 @@ const muiTheme = createTheme({
 
 function App() {
   return (
-    <ThemeProvider theme={muiTheme}>
-      <CssBaseline />
-      <AuthProvider>
-        <Router>
+    <GlobalErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider theme={muiTheme}>
+          <CssBaseline />
+          <AuthProvider>
+            <Router>
           <Routes>
             {/* Public Routes */}
             <Route path="/login" element={<Login />} />
@@ -117,6 +122,8 @@ function App() {
         </Router>
       </AuthProvider>
     </ThemeProvider>
+      </QueryClientProvider>
+    </GlobalErrorBoundary>
   );
 }
 

@@ -219,7 +219,7 @@ const LeaveManagement = () => {
 
       {/* Apply Leave Dialog */}
       <Dialog open={showApplyDialog} onClose={() => setShowApplyDialog(false)} maxWidth="sm" fullWidth
-        PaperProps={{ sx: { borderRadius: '16px', p: 1 } }}>
+        slotProps={{ paper: { sx: { borderRadius: '16px', p: 1 } } }}>
         <DialogTitle sx={{ fontWeight: 700, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           Apply for Leave
           <IconButton onClick={() => setShowApplyDialog(false)} size="small"><X size={18} /></IconButton>

@@ -220,7 +220,7 @@ const MyLeaves = () => {
 
       {/* Apply Leave Dialog */}
       <Dialog open={showApplyDialog} onClose={() => setShowApplyDialog(false)} maxWidth="sm" fullWidth
-        PaperProps={{ sx: { borderRadius: '20px', p: 1 } }}>
+        slotProps={{ paper: { sx: { borderRadius: '20px', p: 1 } } }}>
         <DialogTitle sx={{ fontWeight: 800, fontFamily: 'Inter', display: 'flex', justifyContent: 'space-between', alignItems: 'center', pb: 1 }}>
           Apply for Leave
           <IconButton onClick={() => setShowApplyDialog(false)} size="small"><X size={20} /></IconButton>

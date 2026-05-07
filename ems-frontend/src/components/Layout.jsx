@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { supabase } from '../lib/supabaseClient';
-import { getNavLinks, getRoleDisplay, getRoleBadgeColor, getBreadcrumbs, getPageTitle } from '../utils/roleHelpers';
+import { getNavLinks, getRoleDisplay, getRoleBadgeColor, getBreadcrumbs, getPageTitle, getDashboardRoute } from '../utils/roleHelpers';
 import { notificationService } from '../services/notificationService';
 import Breadcrumb from './Breadcrumb';
 
@@ -105,13 +105,10 @@ const Layout = ({ children }) => {
     });
 
     if (result.isConfirmed) {
-      // 1. Wipe all local storage (removes Supabase token from browser)
-      localStorage.clear();
-      sessionStorage.clear();
-      // 2. Tell Supabase to invalidate session (fire and forget — don't await)
-      supabase.auth.signOut().catch(() => {});
-      // 3. Hard redirect — no React Router, no waiting
-      window.location.replace('/login');
+      await logout();
+      // Use window.location for a hard redirect — guarantees clean state
+      // even if the component unmounts before navigate() can execute.
+      window.location.href = '/login';
     }
   };
 
@@ -264,7 +261,7 @@ const Layout = ({ children }) => {
                 <MenuIcon size={22} />
               </IconButton>
             )}
-            <Link to="/dashboard" style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
+            <Link to={profile ? getDashboardRoute(profile.role) : '/dashboard'} style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
               <Box sx={{
                 width: 36, height: 36, borderRadius: '10px', background: '#4f46e5',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff',
@@ -345,11 +342,13 @@ const Layout = ({ children }) => {
               onClose={() => setNotifAnchor(null)}
               anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
               transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-              PaperProps={{
-                sx: {
-                  mt: 1, width: 320, maxHeight: 480, borderRadius: '16px',
-                  boxShadow: '0 20px 40px -10px rgba(0,0,0,0.2)',
-                  border: '1px solid #f1f5f9', overflow: 'hidden'
+              slotProps={{
+                paper: {
+                  sx: {
+                    mt: 1, width: 320, maxHeight: 480, borderRadius: '16px',
+                    boxShadow: '0 20px 40px -10px rgba(0,0,0,0.2)',
+                    border: '1px solid #f1f5f9', overflow: 'hidden'
+                  }
                 }
               }}
             >
@@ -443,11 +442,13 @@ const Layout = ({ children }) => {
               onClose={() => setProfileAnchor(null)}
               anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
               transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-              PaperProps={{
-                sx: {
-                  mt: 1, minWidth: 200, borderRadius: '12px',
-                  boxShadow: '0 10px 40px -10px rgba(0,0,0,0.15)',
-                  border: '1px solid #f1f5f9'
+              slotProps={{
+                paper: {
+                  sx: {
+                    mt: 1, minWidth: 200, borderRadius: '12px',
+                    boxShadow: '0 10px 40px -10px rgba(0,0,0,0.15)',
+                    border: '1px solid #f1f5f9'
+                  }
                 }
               }}
             >

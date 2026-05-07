@@ -1,64 +1,22 @@
-import React, { useState, useEffect } from 'react';
-import { Box, Avatar, Skeleton } from '@mui/material';
-import { UserCheck, UserX, Clock, Download, ChevronLeft, ChevronRight, CheckCircle, XCircle, MinusCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import { Box, Avatar, Chip } from '@mui/material';
+import { UserCheck, UserX, Clock, Download, ChevronLeft, ChevronRight } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import PageHeader from '../components/PageHeader';
-import { supabase } from '../lib/supabaseClient';
-import { departmentService } from '../services/departmentService';
-import { attendanceService } from '../services/attendanceService';
-import { profileService } from '../services/profileService';
+import DataTable from '../components/DataTable';
+import { useAttendanceOverview } from '../hooks/useAttendance';
+import { useDepartments } from '../hooks/useDepartments';
+import { useAuth } from '../context/AuthContext';
 
 const Attendance = () => {
+  const { profile } = useAuth();
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [attendance, setAttendance] = useState([]);
-  const [departments, setDepartments] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [deptFilter, setDeptFilter] = useState('all');
-  const [stats, setStats] = useState({ present: 0, total: 0 });
 
-  const fetchAttendanceData = async () => {
-    try {
-      setLoading(true);
-      const dateStr = currentDate.toLocaleDateString('en-CA');
-
-      const [attRes, depts, employees] = await Promise.all([
-        supabase.from('attendance').select('*').eq('attendance_date', dateStr),
-        departmentService.getAll(),
-        profileService.getAllEmployees()
-      ]);
-
-      if (attRes.error) throw attRes.error;
-
-      const formatted = (attRes.data || []).map(item => {
-        const profile = employees.find(e => e.id === item.user_id);
-        return {
-          id: item.id,
-          name: profile?.full_name || 'Incomplete Profile',
-          dept: profile?.departments?.name || 'Unassigned',
-          in: item.punch_in_time ? new Date(item.punch_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-',
-          out: item.punch_out_time ? new Date(item.punch_out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-',
-          hours: item.total_hours ? `${item.total_hours}h` : '-',
-          status: item.status.replace('_', ' '),
-          rawStatus: item.status
-        };
-      });
-
-      setAttendance(formatted);
-      setDepartments(depts);
-      setStats({
-        present: attRes.data?.length || 0,
-        total: employees.length
-      });
-    } catch (err) {
-      console.error('Attendance Fetch Error:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchAttendanceData();
-  }, [currentDate]);
+  const dateStr = currentDate.toLocaleDateString('en-CA');
+  
+  const { data: attendance = [], isLoading: loadingAttendance } = useAttendanceOverview(dateStr);
+  const { data: departments = [] } = useDepartments();
 
   const filtered = attendance.filter(a => deptFilter === 'all' || a.dept === deptFilter);
 
@@ -67,6 +25,65 @@ const Attendance = () => {
     next.setDate(next.getDate() + days);
     setCurrentDate(next);
   };
+
+  const baseColumns = [
+    {
+      field: 'name',
+      headerName: 'Employee',
+      flex: 1,
+      minWidth: 200,
+      renderCell: (params) => (
+        <div className="flex items-center gap-3 h-full">
+          <Avatar sx={{ width: 32, height: 32, bgcolor: '#eef2ff', color: '#4f46e5', fontWeight: 700, fontSize: 11 }}>
+            {params.value.charAt(0)}
+          </Avatar>
+          <div className="flex flex-col justify-center">
+            <span className="text-sm font-semibold">{params.value}</span>
+            <span className="text-xs text-slate-500">{params.row.email}</span>
+          </div>
+        </div>
+      )
+    },
+    { field: 'dept', headerName: 'Department', flex: 1, minWidth: 150 },
+    { field: 'punchIn', headerName: 'Punch In', width: 120, align: 'center', headerAlign: 'center' },
+    { field: 'punchOut', headerName: 'Punch Out', width: 120, align: 'center', headerAlign: 'center' },
+    {
+      field: 'status',
+      headerName: 'Status',
+      width: 150,
+      align: 'center',
+      headerAlign: 'center',
+      renderCell: (params) => {
+        const statusColors = {
+          'Present': 'success',
+          'Left': 'info',
+          'Absent': 'error',
+        };
+        return (
+          <div className="flex items-center justify-center h-full">
+            <Chip 
+              label={params.value.toUpperCase()} 
+              color={statusColors[params.value] || 'default'} 
+              size="small" 
+              sx={{ fontWeight: 600, fontSize: '0.7rem', height: 24 }}
+            />
+          </div>
+        );
+      }
+    }
+  ];
+
+  const columns = profile?.role === 'super_admin' ? [
+    ...baseColumns,
+    { field: 'lunchDuration', headerName: 'Lunch (min)', width: 120, align: 'center', headerAlign: 'center' }
+  ] : baseColumns;
+
+  // We no longer have the total number of employees in the overview query directly
+  // So we calculate present vs absent from the records we got for that day
+  const presentCount = attendance.filter(a => a.status === 'Present' || a.status === 'Left').length;
+  const totalRecords = attendance.length;
+  // If no records, total is 0. If there are records, it assumes all employees have an attendance record generated (even if absent).
+  const attendanceRate = totalRecords > 0 ? Math.round((presentCount / totalRecords) * 100) : 0;
 
   return (
     <div className="animate-in fade-in duration-500">
@@ -78,9 +95,9 @@ const Attendance = () => {
 
       {/* KPI Row */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-6">
-        <StatCard title="Present Today" value={loading ? '...' : stats.present.toString()} icon={UserCheck} color="#10b981" bgColor="#ecfdf5" />
-        <StatCard title="Absent Today" value={loading ? '...' : (stats.total - stats.present).toString()} icon={UserX} color="#ef4444" bgColor="#fef2f2" />
-        <StatCard title="Attendance Rate" value={loading ? '...' : `${Math.round((stats.present / stats.total) * 100) || 0}%`} icon={Clock} color="#f59e0b" bgColor="#fffbeb" />
+        <StatCard title="Present" value={loadingAttendance ? '...' : presentCount.toString()} icon={UserCheck} color="#10b981" bgColor="#ecfdf5" />
+        <StatCard title="Absent" value={loadingAttendance ? '...' : (totalRecords - presentCount).toString()} icon={UserX} color="#ef4444" bgColor="#fef2f2" />
+        <StatCard title="Attendance Rate" value={loadingAttendance ? '...' : `${attendanceRate}%`} icon={Clock} color="#f59e0b" bgColor="#fffbeb" />
       </div>
 
       {/* Filters */}
@@ -104,51 +121,12 @@ const Attendance = () => {
 
       {/* Table */}
       <Box className="card-ems-static" sx={{ overflow: 'hidden' }}>
-        <div className="table-responsive">
-          <table className="table-ems" style={{ width: '100%' }}>
-            <thead>
-              <tr>
-                <th>Employee</th>
-                <th>Department</th>
-                <th style={{ textAlign: 'center' }}>Punch In</th>
-                <th style={{ textAlign: 'center' }}>Punch Out</th>
-                <th style={{ textAlign: 'center' }}>Hours</th>
-                <th style={{ textAlign: 'center' }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                [1, 2, 3, 4, 5].map(i => (
-                  <tr key={i}>
-                    <td colSpan={6}><Skeleton height={50} sx={{ mx: 2 }} /></td>
-                  </tr>
-                ))
-              ) : filtered.length > 0 ? filtered.map(row => (
-                <tr key={row.id}>
-                  <td>
-                    <div className="flex items-center gap-3">
-                      <Avatar sx={{ width: 32, height: 32, bgcolor: '#eef2ff', color: '#4f46e5', fontWeight: 700, fontSize: 11 }}>
-                        {row.name.charAt(0)}
-                      </Avatar>
-                      <span className="text-sm font-semibold">{row.name}</span>
-                    </div>
-                  </td>
-                  <td className="text-sm text-slate-500">{row.dept}</td>
-                  <td className="text-sm font-medium text-center">{row.in}</td>
-                  <td className="text-sm font-medium text-center">{row.out}</td>
-                  <td className="text-sm font-semibold text-center">{row.hours}</td>
-                  <td style={{ textAlign: 'center' }}>
-                    <span className={`badge-pill ${row.rawStatus === 'punched_in' ? 'success' : row.rawStatus === 'punched_out' ? 'info' : 'danger'}`}>
-                      {row.status.toUpperCase()}
-                    </span>
-                  </td>
-                </tr>
-              )) : (
-                <tr><td colSpan={6} className="text-center py-10 text-slate-500">No attendance records found for this date.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <DataTable 
+          columns={columns} 
+          data={filtered} 
+          loading={loadingAttendance} 
+          emptyMessage="No attendance records found for this date."
+        />
       </Box>
     </div>
   );

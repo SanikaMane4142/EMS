@@ -3,6 +3,7 @@ import { Box, Avatar } from '@mui/material';
 import { DollarSign, Download, FileText, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import PageHeader from '../components/PageHeader';
+import DataTable from '../components/DataTable';
 
 const Payroll = () => {
   const [selectedMonth, setSelectedMonth] = useState('April 2026');
@@ -22,8 +23,92 @@ const Payroll = () => {
 
   const formatCurrency = (val) => `$${val.toLocaleString()}`;
 
+  const columns = [
+    {
+      field: 'name',
+      headerName: 'Employee',
+      flex: 1.5,
+      minWidth: 200,
+      renderCell: (params) => {
+        const row = params.row;
+        return (
+          <div className="flex items-center gap-3 w-full h-full">
+            <Avatar sx={{ width: 32, height: 32, bgcolor: '#eef2ff', color: '#4f46e5', fontWeight: 700, fontSize: 11 }}>
+              {row.name.charAt(0)}
+            </Avatar>
+            <span className="text-sm font-semibold text-slate-900">{row.name}</span>
+          </div>
+        );
+      }
+    },
+    {
+      field: 'dept',
+      headerName: 'Department',
+      flex: 1,
+      minWidth: 120,
+      renderCell: (params) => <span className="text-sm text-slate-500">{params.value}</span>
+    },
+    {
+      field: 'gross',
+      headerName: 'Gross Pay',
+      flex: 1,
+      minWidth: 120,
+      align: 'right',
+      headerAlign: 'right',
+      renderCell: (params) => <span className="text-sm font-semibold text-slate-900">{formatCurrency(params.value)}</span>
+    },
+    {
+      field: 'deductions',
+      headerName: 'Deductions',
+      flex: 1,
+      minWidth: 120,
+      align: 'right',
+      headerAlign: 'right',
+      renderCell: (params) => <span className="text-sm text-red-500 font-medium">-{formatCurrency(params.value)}</span>
+    },
+    {
+      field: 'net',
+      headerName: 'Net Pay',
+      flex: 1,
+      minWidth: 120,
+      align: 'right',
+      headerAlign: 'right',
+      renderCell: (params) => <span className="text-sm font-bold text-emerald-600">{formatCurrency(params.value)}</span>
+    },
+    {
+      field: 'status',
+      headerName: 'Status',
+      width: 120,
+      align: 'center',
+      headerAlign: 'center',
+      renderCell: (params) => {
+        const status = params.value;
+        return (
+          <span className={`badge-pill ${status === 'Paid' ? 'success' : status === 'Processing' ? 'info' : 'warning'}`}>
+            {status}
+          </span>
+        );
+      }
+    },
+    {
+      field: 'actions',
+      headerName: 'Payslip',
+      width: 100,
+      align: 'right',
+      headerAlign: 'right',
+      sortable: false,
+      renderCell: (params) => (
+        <div className="flex items-center justify-end h-full w-full">
+          <button className="btn-icon-ems" style={{ width: 32, height: 32 }} aria-label={`Download payslip for ${params.row.name}`}>
+            <Download size={14} />
+          </button>
+        </div>
+      )
+    }
+  ];
+
   return (
-    <div>
+    <div className="animate-in fade-in duration-500">
       <PageHeader title="Payroll" subtitle="Monthly payroll management — Restricted access">
         <button className="btn-ems btn-ems-outline">
           <Calendar size={16} /> Change Period
@@ -62,60 +147,11 @@ const Payroll = () => {
       </Box>
 
       {/* Payroll Table */}
-      <Box className="card-ems-static" sx={{ overflow: 'hidden' }}>
-        <div className="table-responsive">
-          <table className="table-ems" style={{ width: '100%' }}>
-            <thead>
-              <tr>
-                <th>Employee</th>
-                <th>Department</th>
-                <th style={{ textAlign: 'right' }}>Gross Pay</th>
-                <th style={{ textAlign: 'right' }}>Deductions</th>
-                <th style={{ textAlign: 'right' }}>Net Pay</th>
-                <th style={{ textAlign: 'center' }}>Status</th>
-                <th style={{ textAlign: 'right' }}>Payslip</th>
-              </tr>
-            </thead>
-            <tbody>
-              {payrollData.map(row => (
-                <tr key={row.id}>
-                  <td>
-                    <div className="flex items-center gap-3">
-                      <Avatar sx={{ width: 32, height: 32, bgcolor: '#eef2ff', color: '#4f46e5', fontWeight: 700, fontSize: 11 }}>
-                        {row.name.charAt(0)}
-                      </Avatar>
-                      <span className="text-sm font-semibold text-slate-900">{row.name}</span>
-                    </div>
-                  </td>
-                  <td className="text-sm text-slate-500">{row.dept}</td>
-                  <td className="text-sm font-semibold text-slate-900" style={{ textAlign: 'right' }}>{formatCurrency(row.gross)}</td>
-                  <td className="text-sm text-red-500 font-medium" style={{ textAlign: 'right' }}>-{formatCurrency(row.deductions)}</td>
-                  <td className="text-sm font-bold text-emerald-600" style={{ textAlign: 'right' }}>{formatCurrency(row.net)}</td>
-                  <td style={{ textAlign: 'center' }}>
-                    <span className={`badge-pill ${row.status === 'Paid' ? 'success' : row.status === 'Processing' ? 'info' : 'warning'}`}>
-                      {row.status}
-                    </span>
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    <button className="btn-icon-ems" style={{ width: 32, height: 32 }} aria-label={`Download payslip for ${row.name}`}>
-                      <Download size={14} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr style={{ borderTop: '2px solid #e2e8f0' }}>
-                <td colSpan={2} className="text-sm font-bold text-slate-900" style={{ padding: '16px' }}>Totals</td>
-                <td className="text-sm font-bold text-slate-900" style={{ textAlign: 'right', padding: '16px' }}>{formatCurrency(totalGross)}</td>
-                <td className="text-sm font-bold text-red-500" style={{ textAlign: 'right', padding: '16px' }}>-{formatCurrency(totalDeductions)}</td>
-                <td className="text-sm font-extrabold text-emerald-600" style={{ textAlign: 'right', padding: '16px' }}>{formatCurrency(totalNet)}</td>
-                <td colSpan={2}></td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      </Box>
+      <DataTable 
+        columns={columns} 
+        data={payrollData} 
+        emptyMessage="No payroll records for this period."
+      />
     </div>
   );
 };

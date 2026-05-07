@@ -89,22 +89,30 @@ export const profileService = {
    * Get upcoming birthdays (within same or next month)
    */
   async getUpcomingBirthdays() {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('full_name, birthday, designation, department_id')
-      .not('birthday', 'is', null)
-      .order('birthday');
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('full_name, birthday, designation, departments!department_id(name)')
+        .not('birthday', 'is', null)
+        .order('birthday');
 
-    if (error) throw error;
+      if (error) {
+        console.warn('[profileService] getUpcomingBirthdays failed:', error.message);
+        return [];
+      }
 
-    const now = new Date();
-    return (data || []).filter(p => {
-      const bday = new Date(p.birthday);
-      return (
-        bday.getMonth() === now.getMonth() ||
-        bday.getMonth() === (now.getMonth() + 1) % 12
-      );
-    }).slice(0, 5);
+      const now = new Date();
+      return (data || []).filter(p => {
+        const bday = new Date(p.birthday);
+        return (
+          bday.getMonth() === now.getMonth() ||
+          bday.getMonth() === (now.getMonth() + 1) % 12
+        );
+      }).slice(0, 5);
+    } catch (err) {
+      console.warn('[profileService] getUpcomingBirthdays unexpected error:', err.message);
+      return [];
+    }
   },
 
   /**

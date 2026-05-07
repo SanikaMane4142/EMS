@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { queryClient } from '../lib/queryClient';
 
 const AuthContext = createContext({});
 
@@ -87,6 +88,14 @@ export const AuthProvider = ({ children }) => {
 
     const { data: authListener } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        if (event === 'SIGNED_OUT') {
+          queryClient.clear();
+          setUser(null);
+          setProfile(null);
+          setLoading(false);
+          return;
+        }
+
         if (session) {
           setUser(session.user);
           if (!profile) await verifyAndFetchProfile(session.user.id);
@@ -118,6 +127,7 @@ export const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     try {
+      queryClient.clear();
       await supabase.auth.signOut();
     } catch (err) {
       console.warn('Supabase logout error:', err.message);

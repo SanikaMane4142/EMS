@@ -1,5 +1,6 @@
 import React from 'react';
-import { Box, Typography } from '@mui/material';
+import { Box } from '@mui/material';
+import { DataGrid } from '@mui/x-data-grid';
 
 const DataTable = ({ columns, data, onRowClick, emptyMessage = 'No data available.' }) => {
   if (!data || data.length === 0) {
@@ -12,45 +13,55 @@ const DataTable = ({ columns, data, onRowClick, emptyMessage = 'No data availabl
     );
   }
 
+  // Convert custom columns to DataGrid columns
+  const dataGridColumns = columns.map((col, i) => ({
+    field: col.key || `col-${i}`,
+    headerName: col.header,
+    flex: 1,
+    minWidth: col.minWidth || 100,
+    align: col.align || 'left',
+    headerAlign: col.align || 'left',
+    renderCell: (params) => {
+      if (col.render) {
+        return col.render(params.value, params.row);
+      }
+      return params.value;
+    },
+    sortable: true,
+  }));
+
+  // Ensure each row has an id
+  const rows = data.map((row, index) => ({
+    ...row,
+    id: row.id || index, // DataGrid requires an 'id' field
+  }));
+
   return (
-    <Box className="card-ems-static" sx={{ overflow: 'hidden' }}>
-      <div className="table-responsive">
-        <table className="table-ems" style={{ width: '100%' }}>
-          <thead>
-            <tr>
-              {columns.map((col, i) => (
-                <th key={i} style={{ textAlign: col.align || 'left', minWidth: col.minWidth }}>
-                  {col.header}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((row, rowIdx) => (
-              <tr
-                key={row.id || rowIdx}
-                onClick={() => onRowClick?.(row)}
-                style={{ cursor: onRowClick ? 'pointer' : 'default' }}
-                tabIndex={onRowClick ? 0 : undefined}
-                role={onRowClick ? 'button' : undefined}
-                aria-label={onRowClick ? `View details for row ${rowIdx + 1}` : undefined}
-                onKeyDown={(e) => {
-                  if (onRowClick && (e.key === 'Enter' || e.key === ' ')) {
-                    e.preventDefault();
-                    onRowClick(row);
-                  }
-                }}
-              >
-                {columns.map((col, colIdx) => (
-                  <td key={colIdx} style={{ textAlign: col.align || 'left' }}>
-                    {col.render ? col.render(row[col.key], row) : row[col.key]}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+    <Box className="card-ems-static" sx={{ overflow: 'hidden', width: '100%' }}>
+      <DataGrid
+        rows={rows}
+        columns={dataGridColumns}
+        onRowClick={(params) => {
+          if (onRowClick) onRowClick(params.row);
+        }}
+        autoHeight
+        initialState={{
+          pagination: {
+            paginationModel: { page: 0, pageSize: 10 },
+          },
+        }}
+        pageSizeOptions={[5, 10, 25, 50]}
+        disableRowSelectionOnClick
+        sx={{
+          border: 'none',
+          '& .MuiDataGrid-cell:focus': {
+            outline: 'none',
+          },
+          '& .MuiDataGrid-row': {
+            cursor: onRowClick ? 'pointer' : 'default',
+          }
+        }}
+      />
     </Box>
   );
 };

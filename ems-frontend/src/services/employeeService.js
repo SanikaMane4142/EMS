@@ -18,6 +18,19 @@ export const employeeService = {
   },
 
   /**
+   * Delete an employee profile
+   */
+  async delete(id) {
+    const { error } = await supabase
+      .from('profiles')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+    return true;
+  },
+
+  /**
    * Get stats for Admin Dashboard
    */
   async getAdminStats() {

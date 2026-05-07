@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Box, Avatar, Chip, Skeleton } from '@mui/material';
+import { Box, Avatar, Chip, Skeleton, Modal, TextField, Typography, Button } from '@mui/material';
 import { Clock, Play, Square, CheckCircle, AlertTriangle, Users, Calendar, FileText, Send, Save, ChevronRight, CheckSquare } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import { attendanceService } from '../services/attendanceService';
@@ -19,16 +19,28 @@ const formatMs = (ms) => {
   return [h, m, s].map(n => String(n).padStart(2, '0')).join(':');
 };
 
-/** Derive elapsed ms directly from a punch_in_time string (Supabase ISO string) */
-const calcElapsedMs = (punchInTimeStr) => {
-  if (!punchInTimeStr) return 0;
-  const diff = Date.now() - new Date(punchInTimeStr).getTime();
+/** Derive elapsed ms directly from a punch_in_time string and lunch breaks */
+const calcElapsedMs = (rec) => {
+  if (!rec?.punch_in_time) return 0;
+  const now = Date.now();
+  let diff = now - new Date(rec.punch_in_time).getTime();
+  
+  if (rec.lunch_duration_ms) {
+    diff -= rec.lunch_duration_ms;
+  }
+  
+  if (rec.lunch_start_time) {
+    const ongoingLunchMs = now - new Date(rec.lunch_start_time).getTime();
+    diff -= ongoingLunchMs;
+  }
+  
   return diff > 0 ? diff : 0;
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SHIFT_MS = 8 * 60 * 60 * 1000; // 8 hours
 const HALF_DAY_MS = 4 * 60 * 60 * 1000; // 4 hours
+const LUNCH_LIMIT_MS = 60 * 60 * 1000; // 1 hour
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const EmployeeDashboard = () => {
@@ -37,6 +49,7 @@ const EmployeeDashboard = () => {
   // Attendance state — Supabase record is the SINGLE source of truth
   const [record, setRecord] = useState(null);
   const [elapsedMs, setElapsedMs] = useState(0);
+  const [lunchElapsedMs, setLunchElapsedMs] = useState(0);
 
   // UI loading states
   const [loading, setLoading] = useState(true);
@@ -58,17 +71,29 @@ const EmployeeDashboard = () => {
   });
   const [reportSubmitted, setReportSubmitted] = useState(false);
 
+  // Late Resume Modal State
+  const [showResumeModal, setShowResumeModal] = useState(false);
+  const [resumeReason, setResumeReason] = useState('');
+
   // Timer interval ref
   const timerRef = useRef(null);
 
   // ── Start / Stop the live ticker ──────────────────────────────────────────
-  const startTimer = (punchInTimeStr) => {
+  const startTimer = (rec) => {
     stopTimer();
     // Immediately set elapsed so the display doesn't flicker to 00:00
-    setElapsedMs(calcElapsedMs(punchInTimeStr));
+    setElapsedMs(calcElapsedMs(rec));
+    if (rec?.lunch_start_time) {
+      setLunchElapsedMs(Date.now() - new Date(rec.lunch_start_time).getTime());
+    } else {
+      setLunchElapsedMs(0);
+    }
 
     timerRef.current = setInterval(() => {
-      setElapsedMs(calcElapsedMs(punchInTimeStr));
+      setElapsedMs(calcElapsedMs(rec));
+      if (rec?.lunch_start_time) {
+        setLunchElapsedMs(Date.now() - new Date(rec.lunch_start_time).getTime());
+      }
     }, 1000);
   };
 
@@ -87,14 +112,17 @@ const EmployeeDashboard = () => {
     setRecord(rec);
     if (rec?.status === 'punched_in' && rec.punch_in_time) {
       // Restore timer from Supabase punch_in_time — works after logout/refresh
-      startTimer(rec.punch_in_time);
+      startTimer(rec);
     } else if (rec?.punch_in_time && rec?.punch_out_time) {
       // Completed shift — show total duration, no live tick
       stopTimer();
-      setElapsedMs(new Date(rec.punch_out_time) - new Date(rec.punch_in_time));
+      const diffMs = new Date(rec.punch_out_time) - new Date(rec.punch_in_time);
+      setElapsedMs(Math.max(0, diffMs - (rec.lunch_duration_ms || 0)));
+      setLunchElapsedMs(0);
     } else {
       stopTimer();
       setElapsedMs(0);
+      setLunchElapsedMs(0);
     }
   };
 
@@ -106,24 +134,26 @@ const EmployeeDashboard = () => {
       setLoading(true);
       try {
         // ── STEP 1: Fetch attendance FIRST, apply immediately ──────────────
-        // This MUST succeed independently — don't bundle with other services
         const attendanceRecord = await attendanceService.getActiveRecord(user.id);
         console.log('[Dashboard] Attendance record:', attendanceRecord);
         applyRecord(attendanceRecord);
+      } catch (err) {
+        console.error('[Dashboard] Critical fetch error:', err);
+      } finally {
+        setLoading(false);
+      }
 
-        // ── STEP 2: Fetch attendance history separately ────────────────────
-        const attendanceHistory = await attendanceService.getAttendanceHistory(user.id, 5)
-          .catch(e => { console.warn('[Dashboard] History fetch failed:', e.message); return []; });
-        setHistory(attendanceHistory);
-
-        // ── STEP 3: Fetch secondary data — errors here won't break timer ───
-        const [myTeam, upcomingBirthdays, todayReport, myLeaves] = await Promise.allSettled([
+      // ── STEP 2: Fetch all secondary data in parallel ───────────────────
+      try {
+        const [historyRes, myTeam, upcomingBirthdays, todayReport, myLeaves] = await Promise.allSettled([
+          attendanceService.getAttendanceHistory(user.id, 5),
           profileService.getDepartmentMembers(profile?.department_id),
           profileService.getUpcomingBirthdays(),
           reportService.getTodayReport(user.id),
           leaveService.getMyLeaves(user.id),
         ]);
 
+        setHistory(historyRes.status === 'fulfilled' ? (historyRes.value || []) : []);
         setTeam(myTeam.status === 'fulfilled' ? (myTeam.value || []) : []);
         setBirthdays(upcomingBirthdays.status === 'fulfilled' ? (upcomingBirthdays.value || []) : []);
 
@@ -136,28 +166,29 @@ const EmployeeDashboard = () => {
           const approved = (myLeaves.value || []).filter(l => l.status === 'approved').length;
           setLeaveBalance(15 - approved);
         }
-
       } catch (err) {
-        console.error('[Dashboard] Critical fetch error:', err);
-      } finally {
-        setLoading(false);
+        console.error('[Dashboard] Secondary fetch error:', err);
       }
     };
 
     fetchData();
-  }, [user?.id]); // Only re-fetch when user changes (login/logout)
+  }, [user?.id, profile?.department_id]); // Re-fetch if user or department changes
 
   // ── Derived state ─────────────────────────────────────────────────────────
   const isPunchedIn = record?.status === 'punched_in';
   const isCompleted = record?.status === 'punched_out' || record?.status === 'auto_punched_out';
+  const isLunchBreak = record?.lunch_start_time != null;
   const isShiftComplete = elapsedMs >= SHIFT_MS;
   const isHalfDayComplete = elapsedMs >= HALF_DAY_MS;
   const remainingMs = Math.max(0, SHIFT_MS - elapsedMs);
+  const isLunchExceeded = isLunchBreak && lunchElapsedMs >= LUNCH_LIMIT_MS;
 
   const statusLabel = loading
     ? 'Loading...'
     : !record
     ? 'Not Started'
+    : isLunchBreak
+    ? isLunchExceeded ? 'Lunch Exceeded' : 'On Lunch Break'
     : isPunchedIn
     ? isShiftComplete ? 'Shift Complete' : 'Working'
     : 'Shift Ended';
@@ -168,7 +199,7 @@ const EmployeeDashboard = () => {
     ? formatMs(elapsedMs) // elapsedMs was set to punch_out - punch_in
     : '00:00:00';
 
-  const borderColor = isPunchedIn ? '#10b981' : isCompleted ? '#3b82f6' : '#f59e0b';
+  const borderColor = isPunchedIn ? (isLunchBreak ? (isLunchExceeded ? '#ef4444' : '#8b5cf6') : '#10b981') : isCompleted ? '#3b82f6' : '#f59e0b';
 
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handlePunchIn = async () => {
@@ -188,7 +219,7 @@ const EmployeeDashboard = () => {
     if (!record?.id) return;
     try {
       setActionLoading(true);
-      const updated = await attendanceService.punchOut(record.id, record.punch_in_time);
+      const updated = await attendanceService.punchOut(record.id, record.punch_in_time, record.lunch_duration_ms || 0);
       applyRecord(updated);
       setHistory(prev => prev.map(h => (h.id === updated.id ? updated : h)));
     } catch (err) {
@@ -202,13 +233,51 @@ const EmployeeDashboard = () => {
     if (!record?.id) return;
     try {
       setActionLoading(true);
-      const updated = await attendanceService.autoPunchOut(record.id, record.punch_in_time);
+      const updated = await attendanceService.autoPunchOut(record.id, record.punch_in_time, record.lunch_duration_ms || 0);
       applyRecord(updated);
       setHistory(prev => prev.map(h => (h.id === updated.id ? updated : h)));
     } catch (err) {
       alert('Auto punch-out failed: ' + err.message);
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleStartLunch = async () => {
+    if (!record?.id) return;
+    try {
+      setActionLoading(true);
+      const updated = await attendanceService.startLunchBreak(record.id);
+      applyRecord(updated);
+      setHistory(prev => prev.map(h => (h.id === updated.id ? updated : h)));
+    } catch (err) {
+      alert('Start lunch failed: ' + err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleResumeWork = async (reason = null) => {
+    if (!record?.id || !record?.lunch_start_time) return;
+    try {
+      setActionLoading(true);
+      const updated = await attendanceService.endLunchBreak(record.id, record.lunch_start_time, record.lunch_duration_ms || 0, reason);
+      applyRecord(updated);
+      setHistory(prev => prev.map(h => (h.id === updated.id ? updated : h)));
+      setShowResumeModal(false);
+      setResumeReason('');
+    } catch (err) {
+      alert('Resume work failed: ' + err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const onResumeClick = () => {
+    if (lunchElapsedMs >= LUNCH_LIMIT_MS) {
+      setShowResumeModal(true);
+    } else {
+      handleResumeWork();
     }
   };
 
@@ -304,22 +373,32 @@ const EmployeeDashboard = () => {
               {/* Center: Timer */}
               <div className="flex flex-col items-center">
                 <div
-                  className="text-3xl font-extrabold text-slate-900 tracking-tight"
+                  className={`text-3xl font-extrabold tracking-tight ${isLunchBreak ? (isLunchExceeded ? 'text-red-600' : 'text-purple-600') : 'text-slate-900'}`}
                   style={{ fontFamily: "'JetBrains Mono', monospace" }}
                 >
-                  {timerDisplay}
+                  {isLunchBreak ? formatMs(lunchElapsedMs) : timerDisplay}
                 </div>
-                {isPunchedIn && !isHalfDayComplete && (
+                {isLunchBreak && !isLunchExceeded && (
+                  <span className="text-[10px] font-bold text-purple-500 mt-1 uppercase tracking-tighter">
+                    Lunch Break ({formatMs(Math.max(0, LUNCH_LIMIT_MS - lunchElapsedMs))} remaining)
+                  </span>
+                )}
+                {isLunchExceeded && (
+                  <span className="text-[10px] font-bold text-red-600 mt-1 uppercase tracking-tighter">
+                    Lunch Limit Exceeded! Please resume work.
+                  </span>
+                )}
+                {isPunchedIn && !isLunchBreak && !isHalfDayComplete && (
                   <span className="text-[10px] font-bold text-amber-600 mt-1 uppercase tracking-tighter">
                     {formatMs(Math.max(0, HALF_DAY_MS - elapsedMs))} until half-day
                   </span>
                 )}
-                {isPunchedIn && isHalfDayComplete && !isShiftComplete && (
+                {isPunchedIn && !isLunchBreak && isHalfDayComplete && !isShiftComplete && (
                   <span className="text-[10px] font-bold text-amber-600 mt-1 uppercase tracking-tighter">
                     {formatMs(remainingMs)} remaining for full shift
                   </span>
                 )}
-                {isPunchedIn && isShiftComplete && (
+                {isPunchedIn && !isLunchBreak && isShiftComplete && (
                   <span className="text-[10px] font-bold text-emerald-600 mt-1 uppercase tracking-tighter">
                     Shift complete — auto punch out available
                   </span>
@@ -327,25 +406,50 @@ const EmployeeDashboard = () => {
               </div>
 
               {/* Right: Action button */}
-              <button
-                className={`btn-ems ${!record ? 'btn-ems-success' : isPunchedIn ? 'btn-ems-danger' : 'btn-ems-secondary'}`}
-                onClick={!record ? handlePunchIn : isPunchedIn ? (isShiftComplete ? handleAutoPunchOut : handlePunchOut) : undefined}
-                disabled={
-                  loading ||
-                  actionLoading ||
-                  isCompleted ||
-                  (isPunchedIn && !isHalfDayComplete)
-                }
-                style={{ minWidth: 160, height: 48 }}
-              >
-                {actionLoading
-                  ? 'Please wait...'
-                  : !record
-                  ? <><Play size={18} /> Punch In</>
-                  : isPunchedIn
-                  ? (isShiftComplete ? <><Square size={18} /> Auto Punch Out</> : <><Square size={18} /> Punch Out</>)
-                  : <><CheckCircle size={18} /> Done for Today</>}
-              </button>
+              <div className="flex flex-col gap-2 sm:items-end">
+                {isLunchBreak ? (
+                  <button
+                    className={`btn-ems ${isLunchExceeded ? 'btn-ems-danger' : 'btn-ems-primary'}`}
+                    onClick={onResumeClick}
+                    disabled={loading || actionLoading}
+                    style={{ minWidth: 160, height: 48, background: isLunchExceeded ? '#ef4444' : '#8b5cf6', color: '#fff', border: 'none' }}
+                  >
+                    {actionLoading ? 'Please wait...' : <><Play size={18} /> Resume Work</>}
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      className={`btn-ems ${!record ? 'btn-ems-success' : isPunchedIn ? 'btn-ems-danger' : 'btn-ems-secondary'}`}
+                      onClick={!record ? handlePunchIn : isPunchedIn ? (isShiftComplete ? handleAutoPunchOut : handlePunchOut) : undefined}
+                      disabled={
+                        loading ||
+                        actionLoading ||
+                        isCompleted ||
+                        (isPunchedIn && !isHalfDayComplete)
+                      }
+                      style={{ minWidth: 160, height: 48 }}
+                    >
+                      {actionLoading
+                        ? 'Please wait...'
+                        : !record
+                        ? <><Play size={18} /> Punch In</>
+                        : isPunchedIn
+                        ? (isShiftComplete ? <><Square size={18} /> Auto Punch Out</> : <><Square size={18} /> Punch Out</>)
+                        : <><CheckCircle size={18} /> Done for Today</>}
+                    </button>
+                    {isPunchedIn && !isCompleted && !record?.lunch_end_time && (
+                      <button
+                        className="flex items-center justify-center gap-2 px-4 py-2 rounded-full font-bold text-amber-900 bg-gradient-to-r from-amber-200 to-amber-400 hover:from-amber-300 hover:to-amber-500 shadow-md hover:shadow-lg transition-all duration-300 ease-in-out transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-md"
+                        onClick={handleStartLunch}
+                        disabled={loading || actionLoading || isShiftComplete}
+                        style={{ minWidth: 160, height: 38, fontSize: '0.85rem' }}
+                      >
+                        <Clock size={16} /> Start Lunch Break
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           </Box>
 
@@ -636,6 +740,44 @@ const EmployeeDashboard = () => {
           </Box>
         </div>
       </div>
+
+      {/* Late Resume Modal */}
+      <Modal open={showResumeModal} onClose={() => setShowResumeModal(false)}>
+        <Box sx={{
+          position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+          width: 400, bgcolor: 'background.paper', borderRadius: 3, boxShadow: 24, p: 4
+        }}>
+          <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 2, display: 'flex', alignItems: 'center', gap: 1, color: '#ef4444' }}>
+            <AlertTriangle size={24} /> Lunch Limit Exceeded
+          </Typography>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
+            You have exceeded the maximum lunch break time of 1 hour. Please provide a reason for the delay before resuming work.
+          </Typography>
+          <TextField
+            fullWidth
+            multiline
+            rows={3}
+            placeholder="E.g., Unexpected client call, delayed at cafeteria..."
+            value={resumeReason}
+            onChange={(e) => setResumeReason(e.target.value)}
+            sx={{ mb: 3 }}
+          />
+          <div className="flex gap-2 justify-end">
+            <Button variant="outlined" onClick={() => setShowResumeModal(false)}>
+              Cancel
+            </Button>
+            <Button 
+              variant="contained" 
+              color="error" 
+              disabled={!resumeReason.trim() || actionLoading} 
+              onClick={() => handleResumeWork(resumeReason)}
+            >
+              {actionLoading ? 'Submitting...' : 'Submit & Resume'}
+            </Button>
+          </div>
+        </Box>
+      </Modal>
+
     </div>
   );
 };

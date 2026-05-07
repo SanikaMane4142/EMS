@@ -2,11 +2,13 @@ import React from 'react';
 import { useLocation, Link } from 'react-router-dom';
 import { Breadcrumbs, Typography, Box } from '@mui/material';
 import { ChevronRight, Home } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import { getBreadcrumbs } from '../utils/roleHelpers';
 
 const Breadcrumb = () => {
   const location = useLocation();
-  const crumbs = getBreadcrumbs(location.pathname);
+  const { profile } = useAuth();
+  const crumbs = getBreadcrumbs(location.pathname, profile?.role);
 
   if (crumbs.length <= 1) return null;
 

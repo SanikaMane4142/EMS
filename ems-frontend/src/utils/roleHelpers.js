@@ -45,7 +45,7 @@ export const getDashboardRoute = (dbRole) => {
 export const getNavLinks = (dbRole) => {
   const allLinks = [
     {
-      to: '/dashboard',
+      to: getDashboardRoute(dbRole),
       icon: LayoutDashboard,
       label: 'Dashboard',
       roles: ['super_admin', 'hr', 'employee'],
@@ -161,11 +161,15 @@ export const getPageTitle = (pathname) => {
 };
 
 // ===== Breadcrumb Generation =====
-export const getBreadcrumbs = (pathname) => {
+export const getBreadcrumbs = (pathname, dbRole) => {
   const segments = pathname.split('/').filter(Boolean);
-  const crumbs = [{ label: 'Home', path: '/dashboard' }];
+  const homePath = dbRole ? getDashboardRoute(dbRole) : '/dashboard';
+  const crumbs = [{ label: 'Home', path: homePath }];
 
   const labelMap = {
+    'admin-dashboard': 'Dashboard',
+    'hr-dashboard': 'Dashboard',
+    'employee-dashboard': 'Dashboard',
     'dashboard': 'Dashboard',
     'employees': 'Employees',
     'departments': 'Departments',

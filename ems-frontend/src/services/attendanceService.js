@@ -80,10 +80,11 @@ export const attendanceService = {
   /**
    * Punch Out — updates the record and calculates total hours.
    */
-  async punchOut(recordId, punchInTime) {
+  async punchOut(recordId, punchInTime, lunchDurationMs = 0) {
     const punchOutTime = new Date();
     const diffMs = punchOutTime - new Date(punchInTime);
-    const totalHours = parseFloat((diffMs / (1000 * 60 * 60)).toFixed(2));
+    const netMs = Math.max(0, diffMs - lunchDurationMs);
+    const totalHours = parseFloat((netMs / (1000 * 60 * 60)).toFixed(2));
 
     const { data, error } = await supabase
       .from('attendance')
@@ -104,14 +105,17 @@ export const attendanceService = {
   /**
    * Auto Punch Out — for overnight/missed punch-outs.
    */
-  async autoPunchOut(recordId, punchInTime) {
+  async autoPunchOut(recordId, punchInTime, lunchDurationMs = 0) {
     const autoOutTime = new Date(new Date(punchInTime).getTime() + 8 * 60 * 60 * 1000);
+    const diffMs = autoOutTime - new Date(punchInTime);
+    const netMs = Math.max(0, diffMs - lunchDurationMs);
+    const totalHours = parseFloat((netMs / (1000 * 60 * 60)).toFixed(2));
 
     const { data, error } = await supabase
       .from('attendance')
       .update({
         punch_out_time: autoOutTime.toISOString(),
-        total_hours: 8.0,
+        total_hours: totalHours,
         status: 'auto_punched_out',
       })
       .eq('id', recordId)
@@ -119,6 +123,55 @@ export const attendanceService = {
       .single();
 
     if (error) throw error;
+    return data;
+  },
+
+  /**
+   * Start Lunch Break — marks the start of a lunch break.
+   */
+  async startLunchBreak(recordId) {
+    const now = new Date();
+    const { data, error } = await supabase
+      .from('attendance')
+      .update({
+        lunch_start_time: now.toISOString(),
+      })
+      .eq('id', recordId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    console.log('[Attendance] Started lunch break at', now.toISOString());
+    return data;
+  },
+
+  /**
+   * End Lunch Break — calculates duration and updates record.
+   */
+  async endLunchBreak(recordId, lunchStartTime, currentDurationMs = 0, delayReason = null) {
+    const now = new Date();
+    const breakMs = now - new Date(lunchStartTime);
+    const newDuration = currentDurationMs + breakMs;
+
+    const updatePayload = {
+      lunch_start_time: null,
+      lunch_end_time: now.toISOString(),
+      lunch_duration_ms: newDuration,
+    };
+
+    if (delayReason) {
+      updatePayload.lunch_delay_reason = delayReason;
+    }
+
+    const { data, error } = await supabase
+      .from('attendance')
+      .update(updatePayload)
+      .eq('id', recordId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    console.log('[Attendance] Ended lunch break. Total duration MS:', newDuration);
     return data;
   },
 
@@ -160,36 +213,22 @@ export const attendanceService = {
   /**
    * [HR/ADMIN] Get formatted list of today's attendance with profiles
    */
-  async getAttendanceOverview() {
-    const today = getTodayIST();
+  async getAttendanceOverview(dateStr = null) {
+    const today = dateStr || getTodayIST();
 
-    // 1. Get attendance records
+    // 1. Get attendance records with profiles joined
     const { data: att, error: attErr } = await supabase
       .from('attendance')
-      .select('*')
+      .select('*, profiles(id, full_name, email, designation)')
       .eq('attendance_date', today);
 
     if (attErr) throw attErr;
     if (!att || att.length === 0) return [];
 
-    // 2. Get profiles for these users
-    const userIds = att.map(r => r.user_id);
-    const { data: profiles, error: profErr } = await supabase
-      .from('profiles')
-      .select('id, full_name, email, designation')
-      .in('id', userIds);
-
-    if (profErr) {
-      console.warn('Could not fetch profiles for attendance overview:', profErr.message);
-      return att.map(r => ({ ...r, name: 'Unknown', email: '-', dept: 'Staff' }));
-    }
-
-    const profileMap = {};
-    profiles.forEach(p => { profileMap[p.id] = p; });
-
-    // 3. Merge and Format
+    // 2. Format
     return att.map(item => {
-      const p = profileMap[item.user_id] || {};
+      const p = item.profiles || {};
+      const lunchMin = item.lunch_duration_ms ? Math.round(item.lunch_duration_ms / 60000) : 0;
       return {
         id: item.id,
         name: p.full_name || p.email || 'Unknown',
@@ -197,7 +236,8 @@ export const attendanceService = {
         dept: p.designation || 'Staff',
         punchIn: item.punch_in_time ? new Date(item.punch_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-',
         punchOut: item.punch_out_time ? new Date(item.punch_out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-',
-        status: item.status === 'punched_in' ? 'Present' : (item.status === 'punched_out' ? 'Left' : 'Absent')
+        status: item.status === 'punched_in' ? 'Present' : (item.status === 'punched_out' ? 'Left' : 'Absent'),
+        lunchDuration: lunchMin
       };
     });
   }
