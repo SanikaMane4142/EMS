@@ -33,6 +33,7 @@ import MyAnalytics from './pages/MyAnalytics';
 
 // Components
 import ProtectedRoute from './routes/ProtectedRoute';
+import { useRealtimeSync } from './hooks/useRealtimeSync';
 
 // MUI Theme
 const muiTheme = createTheme({
@@ -69,10 +70,16 @@ const muiTheme = createTheme({
   }
 });
 
+const RealtimeSyncManager = () => {
+  useRealtimeSync();
+  return null;
+};
+
 function App() {
   return (
     <GlobalErrorBoundary>
       <QueryClientProvider client={queryClient}>
+        <RealtimeSyncManager />
         <ThemeProvider theme={muiTheme}>
           <CssBaseline />
           <AuthProvider>

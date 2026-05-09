@@ -14,7 +14,7 @@ export const useMyTasks = (userId) =>
     queryKey: ['tasks', 'mine', userId],
     queryFn: () => taskService.getMyTasks(userId),
     enabled: !!userId,
-    staleTime: 30_000, // 30 s — tasks don't change every second
+    staleTime: 5_000, // Reduced to 5s since we have realtime sync
   });
 
 /** HR / Admin: all organisation tasks */
@@ -22,7 +22,7 @@ export const useAllTasks = () =>
   useQuery({
     queryKey: ['tasks', 'all'],
     queryFn: () => taskService.getAllTasks(),
-    staleTime: 30_000,
+    staleTime: 5_000,
   });
 
 /** Detailed task info (including subtasks) for modal view */
@@ -112,6 +112,20 @@ export const useToggleSubtask = () => {
   return useMutation({
     mutationFn: ({ subtaskId, isCompleted }) =>
       taskService.toggleSubtask(subtaskId, isCompleted),
+    // Optimistic Update
+    onMutate: async ({ subtaskId, isCompleted }) => {
+      // Cancel refetches so they don't overwrite our optimistic update
+      await qc.cancelQueries({ queryKey: ['tasks'] });
+      await qc.cancelQueries({ queryKey: ['task-subtasks'] });
+
+      // Snapshot previous value
+      const previousTasks = qc.getQueryData(['tasks', 'all']);
+
+      // We could do deep optimistic update here, but for now just invalidating on success is safer
+      // unless we want to implement the full state merging.
+      // Let's stick to invalidation for now but with a very fast response.
+      return { previousTasks };
+    },
     onSuccess: () => invalidateAll(qc),
   });
 };
