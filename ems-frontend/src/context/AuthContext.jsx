@@ -112,12 +112,20 @@ export const AuthProvider = ({ children }) => {
     };
   }, []);
 
-  const login = async (email, password, selectedRole) => {
+  const login = async (employeeId, password) => {
     setError(null);
+
+    // Fetch the email associated with the employee ID using RPC
+    const { data: email, error: fetchError } = await supabase.rpc('get_email_by_employee_id', { emp_id: employeeId });
+
+    if (fetchError || !email) {
+      throw new Error('Invalid employee ID');
+    }
+
     const { data, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
     if (loginError) throw loginError;
 
-    const verifiedProfile = await verifyAndFetchProfile(data.user.id, selectedRole);
+    const verifiedProfile = await verifyAndFetchProfile(data.user.id);
     if (!verifiedProfile) {
       // Error already set in state by verifyAndFetchProfile
       throw new Error(error || 'Login failed. Please check your role and try again.');

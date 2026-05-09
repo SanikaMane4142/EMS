@@ -3,12 +3,11 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { Box } from '@mui/material';
 import { Briefcase, Lock, Mail, ShieldAlert } from 'lucide-react';
-import { getRoleBadgeColor, getDashboardRoute } from '../utils/roleHelpers';
+import { getDashboardRoute } from '../utils/roleHelpers';
 
 const Login = () => {
-  const [email, setEmail] = useState('');
+  const [employeeId, setEmployeeId] = useState('');
   const [password, setPassword] = useState('');
-  const [selectedRole, setSelectedRole] = useState('employee');
   const [localError, setLocalError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   
@@ -27,15 +26,14 @@ const Login = () => {
     setLocalError('');
     setIsSubmitting(true);
 
-    if (!email || !password) {
+    if (!employeeId || !password) {
       setLocalError('Please fill in all fields');
       setIsSubmitting(false);
       return;
     }
 
     try {
-      // Passing selectedRole for Zero-Trust verification
-      await login(email, password, selectedRole);
+      await login(employeeId, password);
     } catch (err) {
       console.error('Login error:', err);
       setLocalError(err.message || 'Invalid login credentials.');
@@ -43,12 +41,6 @@ const Login = () => {
       setIsSubmitting(false);
     }
   };
-
-  const roleOptions = [
-    { value: 'employee', label: 'Employee', display: 'EMPLOYEE' },
-    { value: 'hr', label: 'Administrator', display: 'ADMIN' },
-    { value: 'super_admin', label: 'System Owner', display: 'SUPER_ADMIN' },
-  ];
 
 
 
@@ -83,13 +75,13 @@ const Login = () => {
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div>
-            <label className="text-sm font-semibold text-slate-700 block mb-1.5">Email Address</label>
+            <label className="text-sm font-semibold text-slate-700 block mb-1.5">Employee ID</label>
             <div className="relative">
-              <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Briefcase size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
-                type="email" className="form-input-ems pl-10"
-                placeholder="name@company.com"
-                value={email} onChange={(e) => setEmail(e.target.value)}
+                type="text" className="form-input-ems pl-10"
+                placeholder="Enter Employee ID"
+                value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}
                 disabled={isSubmitting || authLoading}
               />
             </div>
@@ -111,37 +103,6 @@ const Login = () => {
             </div>
           </div>
 
-          <div>
-            <label className="text-sm font-semibold text-slate-700 block mb-2">Select your Role</label>
-            <div className="grid grid-cols-3 gap-2">
-
-
-              {roleOptions.map(opt => {
-                const colors = getRoleBadgeColor(opt.value);
-                const isActive = selectedRole === opt.value;
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => setSelectedRole(opt.value)}
-                    disabled={isSubmitting || authLoading}
-                    className="flex flex-col items-center gap-1.5 p-3 rounded-xl transition-all"
-                    style={{
-                      background: isActive ? colors.bg : '#f8fafc',
-                      border: `2px solid ${isActive ? colors.color : '#e2e8f0'}`,
-                      opacity: (isSubmitting || authLoading) ? 0.7 : 1
-                    }}
-                  >
-                    <span className="text-xs font-bold" style={{ color: isActive ? colors.color : '#64748b' }}>
-                      {opt.display}
-                    </span>
-                    <span className="text-[10px] font-medium text-slate-500">{opt.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
           <button
             type="submit"
             className="btn-ems btn-ems-primary w-full"
@@ -155,7 +116,7 @@ const Login = () => {
         <div className="mt-6 p-4 rounded-xl bg-slate-50 border border-slate-100">
           <p className="text-xs font-bold text-slate-600 mb-2 uppercase tracking-wider">Security Notice</p>
           <p className="text-xs text-slate-500 leading-relaxed font-medium">
-            Your login will be verified against the database. Role mismatches will be blocked.
+            Your login will be verified against the database. Your role will be automatically determined from your profile.
           </p>
         </div>
       </Box>
