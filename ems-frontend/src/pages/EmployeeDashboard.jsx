@@ -1,12 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Box, Avatar, Chip, Skeleton, Modal, TextField, Typography, Button } from '@mui/material';
-import { Clock, Play, Square, CheckCircle, AlertTriangle, Users, Calendar, FileText, Send, Save, ChevronRight, CheckSquare } from 'lucide-react';
+import { Clock, Play, Square, CheckCircle, AlertTriangle, Users, Calendar, FileText, Send, Save, ChevronRight, CheckSquare, Sparkles } from 'lucide-react';
 import StatCard from '../components/StatCard';
-import { attendanceService } from '../services/attendanceService';
+
+// Hooks
+import { useActiveAttendance, useAttendanceHistory, usePunchIn, usePunchOut, useStartLunch, useResumeWork } from '../hooks/useAttendance';
+import { useTodayReport, useSubmitReport } from '../hooks/useReports';
+import { useMyLeaves } from '../hooks/useLeaves';
+import { useMyTasks } from '../hooks/useTasks';
 import { profileService } from '../services/profileService';
 import { reportService } from '../services/reportService';
-import { leaveService } from '../services/leaveService';
+import { taskService } from '../services/taskService';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -44,25 +50,32 @@ const LUNCH_LIMIT_MS = 60 * 60 * 1000; // 1 hour
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const EmployeeDashboard = () => {
-  const { user, profile } = useAuth();
+  const { user, profile, loading: authLoading } = useAuth();
+  const navigate = useNavigate();
 
-  // Attendance state — Supabase record is the SINGLE source of truth
-  const [record, setRecord] = useState(null);
+  // ── Queries & Mutations ───────────────────────────────────────────────────
+  const { data: record, isLoading: attendanceLoading } = useActiveAttendance(user?.id);
+  const { data: history = [], isLoading: historyLoading } = useAttendanceHistory(user?.id, 5);
+  const { data: todayReport, isLoading: reportLoading } = useTodayReport(user?.id);
+  const { data: myLeaves = [] } = useMyLeaves(user?.id);
+  const { data: team = [], isLoading: teamLoading } = { data: [], isLoading: false }; // We'll fetch team separately to keep it simple
+
+  const punchInMutation = usePunchIn();
+  const punchOutMutation = usePunchOut();
+  // Note: we might need to add useStartLunch and useResumeWork to useAttendance.js if they don't exist
+  // For now I'll assume they exist or I'll add them shortly.
+  
+  // Local state for UI only
   const [elapsedMs, setElapsedMs] = useState(0);
   const [lunchElapsedMs, setLunchElapsedMs] = useState(0);
-
-  // UI loading states
-  const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
-
-  // Secondary data
-  const [team, setTeam] = useState([]);
+  const [teamMembers, setTeamMembers] = useState([]);
   const [birthdays, setBirthdays] = useState([]);
-  const [history, setHistory] = useState([]);
-  const [leaveBalance, setLeaveBalance] = useState(12);
   const [reportData, setReportData] = useState({
     tasks_planned: '',
     tasks_completed: '',
+    auto_filled_planned_tasks: [],
+    auto_filled_completed_tasks: [],
     work_in_progress: '',
     tomorrow_plan: '',
     total_working_hours: 8,
@@ -70,24 +83,32 @@ const EmployeeDashboard = () => {
     additional_notes: ''
   });
   const [reportSubmitted, setReportSubmitted] = useState(false);
-
-  // Late Resume Modal State
   const [showResumeModal, setShowResumeModal] = useState(false);
   const [resumeReason, setResumeReason] = useState('');
 
-  // Timer interval ref
   const timerRef = useRef(null);
 
-  // ── Start / Stop the live ticker ──────────────────────────────────────────
+  // ── Sync Report State ──────────────────────────────────────────────────────
+  useEffect(() => {
+    if (todayReport) {
+      setReportData(todayReport);
+      setReportSubmitted(true);
+    }
+  }, [todayReport]);
+
+  // ── Sync Team & Birthdays State ───────────────────────────────────────────
+  useEffect(() => {
+    if (profile?.department_id) {
+      profileService.getDepartmentMembers(profile.department_id).then(setTeamMembers);
+    }
+    profileService.getUpcomingBirthdays().then(setBirthdays);
+  }, [profile?.department_id]);
+
+  // ── Timer Logic ────────────────────────────────────────────────────────────
   const startTimer = (rec) => {
     stopTimer();
-    // Immediately set elapsed so the display doesn't flicker to 00:00
     setElapsedMs(calcElapsedMs(rec));
-    if (rec?.lunch_start_time) {
-      setLunchElapsedMs(Date.now() - new Date(rec.lunch_start_time).getTime());
-    } else {
-      setLunchElapsedMs(0);
-    }
+    setLunchElapsedMs(rec?.lunch_start_time ? Date.now() - new Date(rec.lunch_start_time).getTime() : 0);
 
     timerRef.current = setInterval(() => {
       setElapsedMs(calcElapsedMs(rec));
@@ -104,77 +125,24 @@ const EmployeeDashboard = () => {
     }
   };
 
-  // Cleanup on unmount
-  useEffect(() => () => stopTimer(), []);
-
-  // ── Apply record and drive timer accordingly ──────────────────────────────
-  const applyRecord = (rec) => {
-    setRecord(rec);
-    if (rec?.status === 'punched_in' && rec.punch_in_time) {
-      // Restore timer from Supabase punch_in_time — works after logout/refresh
-      startTimer(rec);
-    } else if (rec?.punch_in_time && rec?.punch_out_time) {
-      // Completed shift — show total duration, no live tick
+  useEffect(() => {
+    if (record?.status === 'punched_in') {
+      startTimer(record);
+    } else if (record?.punch_in_time && record?.punch_out_time) {
       stopTimer();
-      const diffMs = new Date(rec.punch_out_time) - new Date(rec.punch_in_time);
-      setElapsedMs(Math.max(0, diffMs - (rec.lunch_duration_ms || 0)));
+      const diffMs = new Date(record.punch_out_time) - new Date(record.punch_in_time);
+      setElapsedMs(Math.max(0, diffMs - (record.lunch_duration_ms || 0)));
       setLunchElapsedMs(0);
     } else {
       stopTimer();
       setElapsedMs(0);
       setLunchElapsedMs(0);
     }
-  };
-
-  // ── Fetch all dashboard data on mount ────────────────────────────────────
-  useEffect(() => {
-    if (!user?.id) return;
-
-    const fetchData = async () => {
-      setLoading(true);
-      try {
-        // ── STEP 1: Fetch attendance FIRST, apply immediately ──────────────
-        const attendanceRecord = await attendanceService.getActiveRecord(user.id);
-        console.log('[Dashboard] Attendance record:', attendanceRecord);
-        applyRecord(attendanceRecord);
-      } catch (err) {
-        console.error('[Dashboard] Critical fetch error:', err);
-      } finally {
-        setLoading(false);
-      }
-
-      // ── STEP 2: Fetch all secondary data in parallel ───────────────────
-      try {
-        const [historyRes, myTeam, upcomingBirthdays, todayReport, myLeaves] = await Promise.allSettled([
-          attendanceService.getAttendanceHistory(user.id, 5),
-          profileService.getDepartmentMembers(profile?.department_id),
-          profileService.getUpcomingBirthdays(),
-          reportService.getTodayReport(user.id),
-          leaveService.getMyLeaves(user.id),
-        ]);
-
-        setHistory(historyRes.status === 'fulfilled' ? (historyRes.value || []) : []);
-        setTeam(myTeam.status === 'fulfilled' ? (myTeam.value || []) : []);
-        setBirthdays(upcomingBirthdays.status === 'fulfilled' ? (upcomingBirthdays.value || []) : []);
-
-        if (todayReport.status === 'fulfilled' && todayReport.value) {
-          setReportData(todayReport.value);
-          setReportSubmitted(true);
-        }
-
-        if (myLeaves.status === 'fulfilled') {
-          const approved = (myLeaves.value || []).filter(l => l.status === 'approved').length;
-          setLeaveBalance(15 - approved);
-        }
-      } catch (err) {
-        console.error('[Dashboard] Secondary fetch error:', err);
-      }
-    };
-
-    fetchData();
-  }, [user?.id, profile?.department_id]); // Re-fetch if user or department changes
+    return () => stopTimer();
+  }, [record]);
 
   // ── Derived state ─────────────────────────────────────────────────────────
+  const loading = attendanceLoading || authLoading;
   const isPunchedIn = record?.status === 'punched_in';
   const isCompleted = record?.status === 'punched_out' || record?.status === 'auto_punched_out';
   const isLunchBreak = record?.lunch_start_time != null;
@@ -182,6 +150,9 @@ const EmployeeDashboard = () => {
   const isHalfDayComplete = elapsedMs >= HALF_DAY_MS;
   const remainingMs = Math.max(0, SHIFT_MS - elapsedMs);
   const isLunchExceeded = isLunchBreak && lunchElapsedMs >= LUNCH_LIMIT_MS;
+
+  // Calculate leave balance: 15 base - approved leaves
+  const leaveBalance = 15 - myLeaves.filter(l => l.status === 'approved').length;
 
   const statusLabel = loading
     ? 'Loading...'
@@ -196,18 +167,19 @@ const EmployeeDashboard = () => {
   const timerDisplay = isPunchedIn
     ? formatMs(elapsedMs)
     : isCompleted
-    ? formatMs(elapsedMs) // elapsedMs was set to punch_out - punch_in
+    ? formatMs(elapsedMs) 
     : '00:00:00';
 
   const borderColor = isPunchedIn ? (isLunchBreak ? (isLunchExceeded ? '#ef4444' : '#8b5cf6') : '#10b981') : isCompleted ? '#3b82f6' : '#f59e0b';
 
   // ── Handlers ──────────────────────────────────────────────────────────────
+  const startLunchMutation = useStartLunch();
+  const resumeWorkMutation = useResumeWork();
+
   const handlePunchIn = async () => {
     try {
       setActionLoading(true);
-      const newRecord = await attendanceService.punchIn(user.id);
-      applyRecord(newRecord);
-      setHistory(prev => [newRecord, ...prev.slice(0, 4)]);
+      await punchInMutation.mutateAsync(user.id);
     } catch (err) {
       alert('Punch-in failed: ' + err.message);
     } finally {
@@ -219,9 +191,11 @@ const EmployeeDashboard = () => {
     if (!record?.id) return;
     try {
       setActionLoading(true);
-      const updated = await attendanceService.punchOut(record.id, record.punch_in_time, record.lunch_duration_ms || 0);
-      applyRecord(updated);
-      setHistory(prev => prev.map(h => (h.id === updated.id ? updated : h)));
+      await punchOutMutation.mutateAsync({ 
+        recordId: record.id, 
+        punchInTime: record.punch_in_time,
+        lunchDurationMs: record.lunch_duration_ms || 0
+      });
     } catch (err) {
       alert('Punch-out failed: ' + err.message);
     } finally {
@@ -233,9 +207,11 @@ const EmployeeDashboard = () => {
     if (!record?.id) return;
     try {
       setActionLoading(true);
-      const updated = await attendanceService.autoPunchOut(record.id, record.punch_in_time, record.lunch_duration_ms || 0);
-      applyRecord(updated);
-      setHistory(prev => prev.map(h => (h.id === updated.id ? updated : h)));
+      await punchOutMutation.mutateAsync({ 
+        recordId: record.id, 
+        punchInTime: record.punch_in_time,
+        lunchDurationMs: record.lunch_duration_ms || 0
+      });
     } catch (err) {
       alert('Auto punch-out failed: ' + err.message);
     } finally {
@@ -247,9 +223,7 @@ const EmployeeDashboard = () => {
     if (!record?.id) return;
     try {
       setActionLoading(true);
-      const updated = await attendanceService.startLunchBreak(record.id);
-      applyRecord(updated);
-      setHistory(prev => prev.map(h => (h.id === updated.id ? updated : h)));
+      await startLunchMutation.mutateAsync(record.id);
     } catch (err) {
       alert('Start lunch failed: ' + err.message);
     } finally {
@@ -261,9 +235,7 @@ const EmployeeDashboard = () => {
     if (!record?.id || !record?.lunch_start_time) return;
     try {
       setActionLoading(true);
-      const updated = await attendanceService.endLunchBreak(record.id, record.lunch_start_time, record.lunch_duration_ms || 0, reason);
-      applyRecord(updated);
-      setHistory(prev => prev.map(h => (h.id === updated.id ? updated : h)));
+      await resumeWorkMutation.mutateAsync({ recordId: record.id, reason });
       setShowResumeModal(false);
       setResumeReason('');
     } catch (err) {
@@ -311,6 +283,114 @@ const EmployeeDashboard = () => {
       [name]: name === 'total_working_hours' ? parseFloat(value) : 
              name === 'productivity_rating' ? parseInt(value) : value
     }));
+  };
+
+  const handleAutoFill = async () => {
+    if (!user?.id) return;
+    try {
+      setActionLoading(true);
+      const myTasks = await taskService.getMyTasks(user.id);
+      // Only include tasks assigned to me by someone else that are currently "In Progress"
+      const inProgressTasks = myTasks.filter(t => 
+        t.status === 'in_progress' && 
+        t.assigned_to === user.id && 
+        t.assigned_by !== user.id
+      );
+      
+      const plannedItems = [];
+      const completedItems = [];
+      
+      inProgressTasks.forEach(task => {
+        (task.task_groups || []).forEach(group => {
+          // Rule: PLANNED - Only include subtask groups (not completed)
+          if (!group.is_completed) {
+            plannedItems.push({
+              id: group.id,
+              line: `- ${task.title} → ${group.title}`
+            });
+          }
+
+          // Rule: COMPLETED - Include both subtask groups AND mini-tasks
+          if (group.is_completed) {
+            completedItems.push({
+              id: group.id,
+              line: `- ${task.title} → ${group.title}`
+            });
+          }
+          
+          // Mini-tasks for COMPLETED
+          (group.subtasks || []).forEach(mini => {
+            if (mini.is_completed) {
+              completedItems.push({
+                id: mini.id,
+                line: `  • ${task.title} → ${group.title} → ${mini.title}`
+              });
+            }
+          });
+        });
+      });
+
+      setReportData(prev => {
+        const PLANNED_HEADER = "Planned subtasks today:";
+        const COMPLETED_HEADER = "Completed subtasks today:";
+
+        const stripAutoFill = (text, header) => {
+          if (!text) return '';
+          const lines = text.split('\n');
+          const headerIdx = lines.findIndex(l => l.trim() === header);
+          if (headerIdx === -1) return text.trim();
+          return lines.slice(0, headerIdx).join('\n').trim();
+        };
+
+        const manualPlanned = stripAutoFill(prev.tasks_planned, PLANNED_HEADER);
+        const manualCompleted = stripAutoFill(prev.tasks_completed, COMPLETED_HEADER);
+
+        const newPlannedLines = plannedItems.map(i => i.line);
+        const newCompletedLines = completedItems.map(i => i.line);
+        const newAutoPlannedIds = plannedItems.map(i => i.id);
+        const newAutoCompletedIds = completedItems.map(i => i.id);
+
+        // 3. Construct final values
+        const finalPlanned = (manualPlanned + (manualPlanned ? '\n\n' : '') + 
+          (newPlannedLines.length > 0 ? PLANNED_HEADER + '\n' + newPlannedLines.join('\n') : '')).trim();
+        
+        const finalCompleted = (manualCompleted + (manualCompleted ? '\n\n' : '') + 
+          (newCompletedLines.length > 0 ? COMPLETED_HEADER + '\n' + newCompletedLines.join('\n') : '')).trim();
+
+        return {
+          ...prev,
+          tasks_planned: finalPlanned,
+          tasks_completed: finalCompleted,
+          auto_filled_planned_tasks: newAutoPlannedIds,
+          auto_filled_completed_tasks: newAutoCompletedIds
+        };
+      });
+
+      const Toast = (await import('sweetalert2')).default.mixin({
+        toast: true, position: 'top-end', showConfirmButton: false, timer: 2000
+      });
+      Toast.fire({ icon: 'info', title: 'Report auto-filled from tasks.' });
+    } catch (err) {
+      console.error('[AutoFill] Error:', err);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    if (!user?.id) return;
+    try {
+      setActionLoading(true);
+      await reportService.submitDailyReport(user.id, reportData);
+      const Toast = (await import('sweetalert2')).default.mixin({
+        toast: true, position: 'top-end', showConfirmButton: false, timer: 2000
+      });
+      Toast.fire({ icon: 'success', title: 'Draft saved successfully.' });
+    } catch (err) {
+      console.error('Draft save failed:', err);
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -459,11 +539,23 @@ const EmployeeDashboard = () => {
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
                 <FileText size={18} /> Daily Work Report
               </h3>
-              {reportSubmitted && (
-                <span className="badge-pill success flex items-center gap-1">
-                  <CheckCircle size={13} /> Submitted
-                </span>
-              )}
+              <div className="flex items-center gap-2">
+                {!reportSubmitted && (
+                  <button 
+                    type="button" 
+                    className="text-[10px] font-black text-indigo-600 uppercase tracking-widest flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-all"
+                    onClick={handleAutoFill}
+                    disabled={actionLoading}
+                  >
+                    <Sparkles size={12} /> Auto-fill from tasks
+                  </button>
+                )}
+                {reportSubmitted && (
+                  <span className="badge-pill success flex items-center gap-1">
+                    <CheckCircle size={13} /> Submitted
+                  </span>
+                )}
+              </div>
             </div>
 
             {!reportSubmitted ? (
@@ -539,7 +631,7 @@ const EmployeeDashboard = () => {
                   <button type="submit" className="btn-ems btn-ems-primary flex-1" disabled={actionLoading}>
                     <Send size={16} /> {actionLoading ? 'Submitting...' : 'Submit Today’s Report'}
                   </button>
-                  <button type="button" className="btn-ems btn-ems-secondary" style={{ width: 130 }} onClick={() => alert('Draft saved locally (Coming Soon)')}>
+                  <button type="button" className="btn-ems btn-ems-secondary" style={{ width: 130 }} onClick={handleSaveDraft} disabled={actionLoading}>
                     <Save size={16} /> Save Draft
                   </button>
                 </div>
@@ -644,14 +736,14 @@ const EmployeeDashboard = () => {
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
                 <Users size={18} /> Team Status
               </h3>
-              <span className="badge-pill info">{team.length} Members</span>
+              <span className="badge-pill info">{teamMembers.length} Members</span>
             </div>
             <div className="flex flex-col gap-3">
-              {loading ? (
+              {loading || teamLoading ? (
                 [1, 2, 3].map(i => <Skeleton key={i} variant="rounded" height={60} sx={{ borderRadius: '12px' }} />)
-              ) : team.length === 0 ? (
+              ) : teamMembers.length === 0 ? (
                 <p className="text-sm text-slate-400 text-center py-4">No team members found</p>
-              ) : team.map((member, i) => (
+              ) : teamMembers.map((member, i) => (
                 <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl transition-all hover:bg-slate-50 cursor-pointer">
                   <Avatar sx={{ width: 40, height: 40, bgcolor: '#f1f5f9', color: '#4f46e5', fontWeight: 700, fontSize: 13 }}>
                     {member.full_name?.charAt(0) || '?'}

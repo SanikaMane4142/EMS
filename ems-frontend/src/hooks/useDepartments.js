@@ -7,3 +7,10 @@ export const useDepartments = () => {
     queryFn: () => departmentService.getAll(),
   });
 };
+
+export const useDepartmentStats = () => {
+  return useQuery({
+    queryKey: ['departments', 'stats'],
+    queryFn: () => departmentService.getDepartmentStats(),
+  });
+};

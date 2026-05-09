@@ -77,51 +77,52 @@ function App() {
           <CssBaseline />
           <AuthProvider>
             <Router>
-          <Routes>
-            {/* Public Routes */}
-            <Route path="/login" element={<Login />} />
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Routes>
+                {/* Public Routes */}
+                <Route path="/login" element={<Login />} />
+                <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-            {/* Role-Specific Dashboards */}
-            <Route path="/admin-dashboard" element={<ProtectedRoute allowedRoles={['super_admin']}><Dashboard /></ProtectedRoute>} />
-            <Route path="/hr-dashboard" element={<ProtectedRoute allowedRoles={['hr']}><Dashboard /></ProtectedRoute>} />
-            <Route path="/employee-dashboard" element={<ProtectedRoute allowedRoles={['employee']}><Dashboard /></ProtectedRoute>} />
+                {/* Role-Specific Dashboards */}
+                <Route path="/admin-dashboard" element={<ProtectedRoute allowedRoles={['super_admin']}><Dashboard /></ProtectedRoute>} />
+                <Route path="/hr-dashboard" element={<ProtectedRoute allowedRoles={['hr']}><Dashboard /></ProtectedRoute>} />
+                <Route path="/employee-dashboard" element={<ProtectedRoute allowedRoles={['employee']}><Dashboard /></ProtectedRoute>} />
 
-            {/* Admin/HR Management Routes */}
-            <Route path="/employees" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><Employees /></ProtectedRoute>} />
-            <Route path="/employee/:id" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><EmployeeProfile /></ProtectedRoute>} />
-            <Route path="/departments" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><Departments /></ProtectedRoute>} />
-            <Route path="/attendance" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><Attendance /></ProtectedRoute>} />
-            <Route path="/payroll" element={<ProtectedRoute allowedRoles={['super_admin']}><Payroll /></ProtectedRoute>} />
-            <Route path="/leave" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><LeaveManagement /></ProtectedRoute>} />
-            <Route path="/reports" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><Reports /></ProtectedRoute>} />
-            <Route path="/users" element={<ProtectedRoute allowedRoles={['super_admin']}><UsersPage /></ProtectedRoute>} />
-            <Route path="/settings" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><Settings /></ProtectedRoute>} />
-            <Route path="/organization-tasks" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><AdminTaskView /></ProtectedRoute>} />
+                {/* Admin/HR Management Routes */}
+                <Route path="/employees" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><Employees /></ProtectedRoute>} />
+                <Route path="/employee/:id" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><EmployeeProfile /></ProtectedRoute>} />
+{/* <Route path="/departments" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><Departments /></ProtectedRoute>} /> */}
+                <Route path="/attendance" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><Attendance /></ProtectedRoute>} />
+                <Route path="/payroll" element={<ProtectedRoute allowedRoles={['super_admin']}><Payroll /></ProtectedRoute>} />
+                <Route path="/leave" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><LeaveManagement /></ProtectedRoute>} />
+                <Route path="/reports" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><Reports /></ProtectedRoute>} />
+                <Route path="/users" element={<ProtectedRoute allowedRoles={['super_admin']}><UsersPage /></ProtectedRoute>} />
+                <Route path="/settings" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><Settings /></ProtectedRoute>} />
+                <Route path="/organization-tasks" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><AdminTaskView /></ProtectedRoute>} />
 
-            {/* Employee Modules */}
-            <Route path="/my-attendance" element={<ProtectedRoute allowedRoles={['employee']}><MyAttendance /></ProtectedRoute>} />
-            <Route path="/my-leaves" element={<ProtectedRoute allowedRoles={['employee']}><MyLeaves /></ProtectedRoute>} />
-            <Route path="/daily-logs" element={<ProtectedRoute allowedRoles={['employee']}><DailyLogs /></ProtectedRoute>} />
-            <Route path="/my-team" element={<ProtectedRoute allowedRoles={['employee']}><MyTeam /></ProtectedRoute>} />
-            <Route path="/my-calendar" element={<ProtectedRoute allowedRoles={['employee']}><MyCalendar /></ProtectedRoute>} />
-            <Route path="/my-analytics" element={<ProtectedRoute allowedRoles={['employee']}><MyAnalytics /></ProtectedRoute>} />
-            <Route path="/my-documents" element={<ProtectedRoute allowedRoles={['employee']}><MyDocuments /></ProtectedRoute>} />
-            <Route path="/my-tasks" element={<ProtectedRoute allowedRoles={['employee']}><MyTasks /></ProtectedRoute>} />
-            <Route path="/chat" element={<ProtectedRoute allowedRoles={['employee']}><ChatModule /></ProtectedRoute>} />
+                {/* Employee Modules */}
+                <Route path="/my-attendance" element={<ProtectedRoute allowedRoles={['employee']}><MyAttendance /></ProtectedRoute>} />
+                <Route path="/my-leaves" element={<ProtectedRoute allowedRoles={['employee']}><MyLeaves /></ProtectedRoute>} />
+                <Route path="/daily-logs" element={<ProtectedRoute allowedRoles={['employee']}><DailyLogs /></ProtectedRoute>} />
+                <Route path="/my-team" element={<ProtectedRoute allowedRoles={['employee']}><MyTeam /></ProtectedRoute>} />
+                <Route path="/my-calendar" element={<ProtectedRoute allowedRoles={['employee']}><MyCalendar /></ProtectedRoute>} />
+                <Route path="/my-analytics" element={<ProtectedRoute allowedRoles={['employee']}><MyAnalytics /></ProtectedRoute>} />
+                <Route path="/my-documents" element={<ProtectedRoute allowedRoles={['employee']}><MyDocuments /></ProtectedRoute>} />
+                <Route path="/my-tasks" element={<ProtectedRoute allowedRoles={['employee', 'hr', 'super_admin']}><MyTasks /></ProtectedRoute>} />
+                <Route path="/my-tasks/:id" element={<ProtectedRoute allowedRoles={['employee', 'hr', 'super_admin']}><MyTasks /></ProtectedRoute>} />
+                <Route path="/chat" element={<ProtectedRoute allowedRoles={['employee']}><ChatModule /></ProtectedRoute>} />
 
-            {/* Shared Routes */}
-            <Route path="/profile" element={<ProtectedRoute allowedRoles={['employee', 'hr', 'super_admin']}><MyProfile /></ProtectedRoute>} />
+                {/* Shared Routes */}
+                <Route path="/profile" element={<ProtectedRoute allowedRoles={['employee', 'hr', 'super_admin']}><MyProfile /></ProtectedRoute>} />
 
 
-            {/* Default Navigation */}
-            <Route path="/" element={<Navigate to="/login" replace />} />
-            <Route path="*" element={<Navigate to="/login" replace />} />
+                {/* Default Navigation */}
+                <Route path="/" element={<Navigate to="/login" replace />} />
+                <Route path="*" element={<Navigate to="/login" replace />} />
 
-          </Routes>
-        </Router>
-      </AuthProvider>
-    </ThemeProvider>
+              </Routes>
+            </Router>
+          </AuthProvider>
+        </ThemeProvider>
       </QueryClientProvider>
     </GlobalErrorBoundary>
   );

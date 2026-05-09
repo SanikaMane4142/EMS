@@ -75,7 +75,7 @@ const Employees = () => {
       headerName: 'Department', 
       flex: 1, 
       minWidth: 150,
-      valueGetter: (params) => params.row.departments?.name || 'Unassigned',
+      valueGetter: (value, row) => row?.departments?.name || 'Unassigned',
       renderCell: (params) => <span className="text-sm text-slate-500">{params.value}</span>
     },
     { 
@@ -83,7 +83,7 @@ const Employees = () => {
       headerName: 'Role', 
       flex: 1, 
       minWidth: 150,
-      valueGetter: (params) => params.row.designation || 'Employee',
+      valueGetter: (value, row) => row?.designation || 'Employee',
       renderCell: (params) => <span className="text-sm text-slate-500 font-medium">{params.value}</span>
     },
     {

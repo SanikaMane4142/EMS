@@ -56,12 +56,7 @@ export const getNavLinks = (dbRole) => {
       label: 'Employees',
       roles: ['super_admin', 'hr'],
     },
-    {
-      to: '/departments',
-      icon: Building,
-      label: 'Departments',
-      roles: ['super_admin', 'hr'],
-    },
+
     {
       to: '/attendance',
       icon: Clock,
@@ -112,12 +107,7 @@ export const getNavLinks = (dbRole) => {
       label: 'Org Tasks',
       roles: ['super_admin', 'hr'],
     },
-    {
-      to: '/daily-logs',
-      icon: FileText,
-      label: 'Daily Logs',
-      roles: ['employee', 'hr', 'super_admin'],
-    },
+
     {
       to: '/users',
       icon: Shield,
@@ -136,7 +126,7 @@ export const getPageTitle = (pathname) => {
   const titleMap = {
     '/dashboard': 'Dashboard',
     '/employees': 'Employees',
-    '/departments': 'Departments',
+
     '/attendance': 'Attendance',
     '/my-attendance': 'My Attendance',
     '/payroll': 'Payroll',
@@ -172,7 +162,7 @@ export const getBreadcrumbs = (pathname, dbRole) => {
     'employee-dashboard': 'Dashboard',
     'dashboard': 'Dashboard',
     'employees': 'Employees',
-    'departments': 'Departments',
+
     'attendance': 'Attendance',
     'my-attendance': 'My Attendance',
     'payroll': 'Payroll',
@@ -195,7 +185,9 @@ export const getBreadcrumbs = (pathname, dbRole) => {
   let currentPath = '';
   segments.forEach((segment) => {
     currentPath += `/${segment}`;
-    const label = labelMap[segment] || segment.charAt(0).toUpperCase() + segment.slice(1).replace(/-/g, ' ');
+    // Check for dynamic label override in localStorage (e.g., for task names)
+    const storedLabel = localStorage.getItem(`breadcrumb_label_${segment}`);
+    const label = storedLabel || labelMap[segment] || segment.charAt(0).toUpperCase() + segment.slice(1).replace(/-/g, ' ');
     crumbs.push({ label, path: currentPath });
   });
 

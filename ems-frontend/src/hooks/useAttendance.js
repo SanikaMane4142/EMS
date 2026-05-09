@@ -31,6 +31,13 @@ export const useAttendanceOverview = (dateStr) => {
   });
 };
 
+export const useAttendanceTrends = () => {
+  return useQuery({
+    queryKey: ['attendance', 'trends'],
+    queryFn: () => attendanceService.getAttendanceTrends(),
+  });
+};
+
 export const usePunchIn = () => {
   const queryClient = useQueryClient();
   return useMutation({
@@ -54,6 +61,27 @@ export const usePunchOut = () => {
       queryClient.invalidateQueries({ queryKey: ['attendance', 'history', userId] });
       queryClient.invalidateQueries({ queryKey: ['attendance', 'stats'] });
       queryClient.invalidateQueries({ queryKey: ['attendance', 'overview'] });
+    },
+  });
+};
+export const useStartLunch = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (recordId) => attendanceService.startLunch(recordId),
+    onSuccess: (data) => {
+      const userId = data.user_id;
+      queryClient.invalidateQueries({ queryKey: ['attendance', 'active', userId] });
+    },
+  });
+};
+
+export const useResumeWork = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ recordId, reason }) => attendanceService.resumeWork(recordId, reason),
+    onSuccess: (data) => {
+      const userId = data.user_id;
+      queryClient.invalidateQueries({ queryKey: ['attendance', 'active', userId] });
     },
   });
 };

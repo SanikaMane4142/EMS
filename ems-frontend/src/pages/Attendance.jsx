@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Box, Avatar, Chip } from '@mui/material';
 import { UserCheck, UserX, Clock, Download, ChevronLeft, ChevronRight } from 'lucide-react';
+import { utils, writeFile } from 'xlsx';
 import StatCard from '../components/StatCard';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
@@ -24,6 +25,33 @@ const Attendance = () => {
     const next = new Date(currentDate);
     next.setDate(next.getDate() + days);
     setCurrentDate(next);
+  };
+
+  const handleExport = () => {
+    if (filtered.length === 0) return;
+
+    // Prepare data for Excel
+    const excelData = filtered.map(row => ({
+      'Employee Name': row.name,
+      'Email': row.email,
+      'Department': row.dept,
+      'Punch In': row.punchIn,
+      'Punch Out': row.punchOut,
+      'Status': row.status,
+      'Lunch (min)': row.lunchDuration || 0,
+      'Actual Work': row.totalHours > 0 ? `${row.totalHours}h` : '--'
+    }));
+
+    // Create worksheet
+    const worksheet = utils.json_to_sheet(excelData);
+    
+    // Create workbook
+    const workbook = utils.book_new();
+    utils.book_append_sheet(workbook, worksheet, 'Attendance');
+
+    // Download file
+    const fileName = `Attendance_Log_${dateStr}.xlsx`;
+    writeFile(workbook, fileName);
   };
 
   const baseColumns = [
@@ -73,9 +101,23 @@ const Attendance = () => {
     }
   ];
 
-  const columns = profile?.role === 'super_admin' ? [
+  const isAdmin = ['hr', 'admin', 'super_admin'].includes(profile?.role);
+  
+  const columns = isAdmin ? [
     ...baseColumns,
-    { field: 'lunchDuration', headerName: 'Lunch (min)', width: 120, align: 'center', headerAlign: 'center' }
+    { field: 'lunchDuration', headerName: 'Lunch (min)', width: 100, align: 'center', headerAlign: 'center' },
+    { 
+      field: 'totalHours', 
+      headerName: 'Actual Work', 
+      width: 120, 
+      align: 'center', 
+      headerAlign: 'center',
+      renderCell: (params) => (
+        <span className="font-bold text-indigo-600">
+          {params.value > 0 ? `${params.value}h` : '--'}
+        </span>
+      )
+    }
   ] : baseColumns;
 
   // We no longer have the total number of employees in the overview query directly
@@ -88,7 +130,7 @@ const Attendance = () => {
   return (
     <div className="animate-in fade-in duration-500">
       <PageHeader title="Attendance" subtitle="Track employee attendance">
-        <button className="btn-ems btn-ems-outline">
+        <button className="btn-ems btn-ems-outline" onClick={handleExport}>
           <Download size={16} /> Export Log
         </button>
       </PageHeader>

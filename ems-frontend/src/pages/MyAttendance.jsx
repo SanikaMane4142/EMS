@@ -1,43 +1,62 @@
 import React, { useState, useEffect } from "react";
 import { Calendar, CheckCircle2, Clock, Download, AlertCircle, CalendarDays, Play, Square, MoreVertical, TrendingUp } from "lucide-react";
-import { Box, Chip, Avatar } from '@mui/material';
+import { Box, Chip, Avatar, Skeleton } from '@mui/material';
 import PageHeader from '../components/PageHeader';
 import StatCard from '../components/StatCard';
+import { useAuth } from '../context/AuthContext';
+import { useActiveAttendance, useAttendanceHistory, usePunchIn, usePunchOut } from '../hooks/useAttendance';
+import { useMyLeaves } from '../hooks/useLeaves';
 
 const MyAttendance = () => {
-  const [isPunchedIn, setIsPunchedIn] = useState(false);
-  const [punchTime, setPunchTime] = useState(null);
+  const { user } = useAuth();
   const [currentTime, setCurrentTime] = useState(new Date());
+
+  // ── Queries ────────────────────────────────────────────────────────────────
+  const { data: record, isLoading: attendanceLoading } = useActiveAttendance(user?.id);
+  const { data: history = [], isLoading: historyLoading } = useAttendanceHistory(user?.id, 10);
+  const { data: myLeaves = [] } = useMyLeaves(user?.id);
+
+  // ── Mutations ──────────────────────────────────────────────────────────────
+  const punchInMutation = usePunchIn();
+  const punchOutMutation = usePunchOut();
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
+  // ── Derived Stats ─────────────────────────────────────────────────────────
+  const approvedLeaves = myLeaves.filter(l => l.status === 'approved').length;
+  const daysPresent = history.filter(h => h.status !== 'absent').length;
+  const totalHours = history.reduce((acc, h) => acc + (h.total_hours || 0), 0).toFixed(1);
+
   const stats = [
-    { label: "Days Present", value: "18", icon: CheckCircle2, color: "#10b981", bg: "#ecfdf5" },
-    { label: "Total Hours", value: "142h", icon: Clock, color: "#4f46e5", bg: "#eef2ff" },
-    { label: "Late Arrivals", value: "02", icon: AlertCircle, color: "#f59e0b", bg: "#fffbeb" },
-    { label: "Total Leaves", value: "01", icon: CalendarDays, color: "#ef4444", bg: "#fef2f2" },
+    { label: "Days Present", value: historyLoading ? '...' : daysPresent.toString(), icon: CheckCircle2, color: "#10b981", bg: "#ecfdf5" },
+    { label: "Total Hours", value: historyLoading ? '...' : `${totalHours}h`, icon: Clock, color: "#4f46e5", bg: "#eef2ff" },
+    { label: "Leaves Taken", value: historyLoading ? '...' : approvedLeaves.toString(), icon: CalendarDays, color: "#ef4444", bg: "#fef2f2" },
+    { label: "Avg. Daily", value: historyLoading ? '...' : (daysPresent > 0 ? (totalHours / daysPresent).toFixed(1) + 'h' : '0h'), icon: TrendingUp, color: "#8b5cf6", bg: "#f5f3ff" },
   ];
 
-  const attendanceHistory = [
-    { date: "28 Apr, 2026", punchIn: "08:55 AM", punchOut: "05:30 PM", duration: "8h 35m", status: "Present" },
-    { date: "27 Apr, 2026", punchIn: "09:05 AM", punchOut: "06:00 PM", duration: "8h 55m", status: "Late" },
-    { date: "26 Apr, 2026", punchIn: "08:45 AM", punchOut: "05:15 PM", duration: "8h 30m", status: "Present" },
-  ];
+  const isPunchedIn = record?.status === 'punched_in';
 
-  const handlePunch = () => {
-    if (!isPunchedIn) {
-      setPunchTime(new Date());
-    } else {
-      setPunchTime(null);
+  const handlePunch = async () => {
+    try {
+      if (!isPunchedIn) {
+        await punchInMutation.mutateAsync(user.id);
+      } else {
+        await punchOutMutation.mutateAsync({
+          recordId: record.id,
+          punchInTime: record.punch_in_time,
+          lunchDurationMs: record.lunch_duration_ms || 0
+        });
+      }
+    } catch (err) {
+      alert('Action failed: ' + err.message);
     }
-    setIsPunchedIn(!isPunchedIn);
   };
 
   return (
-    <div>
+    <div className="animate-in fade-in duration-500">
       <PageHeader title="My Attendance" subtitle="Track your daily presence and work hours" />
 
       {/* Punch Card Section */}
@@ -47,9 +66,13 @@ const MyAttendance = () => {
             <div className={`w-3 h-3 rounded-full ${isPunchedIn ? 'bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)] animate-pulse' : 'bg-slate-300'}`} />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-slate-900">{isPunchedIn ? "You are Punched In" : "Ready to start your day?"}</h2>
+            <h2 className="text-xl font-bold text-slate-900">
+              {attendanceLoading ? "Checking status..." : isPunchedIn ? "You are Punched In" : "Ready to start your day?"}
+            </h2>
             <p className="text-sm text-slate-500 font-medium">
-              {isPunchedIn ? `Punched in at ${punchTime?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : "Please punch in to track your attendance."}
+              {isPunchedIn
+                ? `Punched in at ${new Date(record.punch_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                : "Please punch in to track your attendance."}
             </p>
           </div>
         </div>
@@ -62,8 +85,11 @@ const MyAttendance = () => {
           <button
             className={`btn-ems h-14 px-8 text-base shadow-lg transition-all ${isPunchedIn ? 'btn-ems-danger !shadow-red-200' : 'btn-ems-primary !shadow-indigo-200'}`}
             onClick={handlePunch}
+            disabled={attendanceLoading || punchInMutation.isPending || punchOutMutation.isPending}
           >
-            {isPunchedIn ? <><Square size={20} /> Punch Out</> : <><Play size={20} /> Punch In</>}
+            {punchInMutation.isPending || punchOutMutation.isPending
+              ? "Processing..."
+              : isPunchedIn ? <><Square size={20} /> Punch Out</> : <><Play size={20} /> Punch In</>}
           </button>
         </div>
       </Box>
@@ -84,9 +110,6 @@ const MyAttendance = () => {
             </div>
             <h2 className="text-base font-bold text-slate-900">Attendance History</h2>
           </div>
-          <button className="btn-ems btn-ems-secondary !h-9 !text-xs">
-            <Download size={14} /> Export Report
-          </button>
         </div>
 
         <div className="table-responsive">
@@ -99,28 +122,40 @@ const MyAttendance = () => {
                 <th>Punch Out</th>
                 <th>Duration</th>
                 <th>Status</th>
-                <th style={{ textAlign: 'right' }}></th>
               </tr>
             </thead>
             <tbody>
-              {attendanceHistory.map((row, i) => (
+              {historyLoading ? (
+                [1, 2, 3].map(i => (
+                  <tr key={i}>
+                    <td colSpan="6"><Skeleton height={40} /></td>
+                  </tr>
+                ))
+              ) : history.length === 0 ? (
+                <tr><td colSpan="6" className="text-center p-8 text-slate-400">No history found</td></tr>
+              ) : history.map((row, i) => (
                 <tr key={i}>
                   <td>
-                    <div className="w-10 h-10 rounded-xl bg-slate-50 text-slate-400 flex items-center justify-center mx-auto group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors">
+                    <div className="w-10 h-10 rounded-xl bg-slate-50 text-slate-400 flex items-center justify-center mx-auto transition-colors">
                       <Calendar size={18} />
                     </div>
                   </td>
-                  <td className="text-sm font-bold text-slate-700">{row.date}</td>
-                  <td className="text-sm font-medium text-slate-600">{row.punchIn}</td>
-                  <td className="text-sm font-medium text-slate-600">{row.punchOut}</td>
-                  <td className="text-sm font-bold text-slate-900">{row.duration}</td>
-                  <td>
-                    <span className={`badge-pill ${row.status === 'Present' ? 'success' : row.status === 'Late' ? 'warning' : 'danger'}`}>
-                      {row.status}
-                    </span>
+                  <td className="text-sm font-bold text-slate-700">
+                    {new Date(row.attendance_date + 'T00:00').toLocaleDateString([], { day: 'numeric', month: 'short' })}
                   </td>
-                  <td style={{ textAlign: 'right' }}>
-                    <button className="btn-icon-ems"><MoreVertical size={18} /></button>
+                  <td className="text-sm font-medium text-slate-600">
+                    {row.punch_in_time ? new Date(row.punch_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
+                  </td>
+                  <td className="text-sm font-medium text-slate-600">
+                    {row.punch_out_time ? new Date(row.punch_out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
+                  </td>
+                  <td className="text-sm font-bold text-slate-900">
+                    {row.total_hours ? `${row.total_hours}h` : row.status === 'punched_in' ? 'Ongoing' : '--'}
+                  </td>
+                  <td>
+                    <span className={`badge-pill ${row.status === 'punched_in' ? 'info' : 'success'}`}>
+                      {row.status.replace('_', ' ')}
+                    </span>
                   </td>
                 </tr>
               ))}

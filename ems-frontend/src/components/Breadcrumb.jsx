@@ -8,6 +8,15 @@ import { getBreadcrumbs } from '../utils/roleHelpers';
 const Breadcrumb = () => {
   const location = useLocation();
   const { profile } = useAuth();
+  
+  // Force re-render when localStorage changes (for dynamic labels)
+  const [, setTick] = React.useState(0);
+  React.useEffect(() => {
+    const handleStorage = () => setTick(t => t + 1);
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
   const crumbs = getBreadcrumbs(location.pathname, profile?.role);
 
   if (crumbs.length <= 1) return null;

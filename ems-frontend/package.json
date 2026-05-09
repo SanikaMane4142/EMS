@@ -29,7 +29,8 @@
     "react-dom": "^19.2.5",
     "react-error-boundary": "^6.1.1",
     "react-router-dom": "^7.14.2",
-    "sweetalert2": "^11.26.24"
+    "sweetalert2": "^11.26.24",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

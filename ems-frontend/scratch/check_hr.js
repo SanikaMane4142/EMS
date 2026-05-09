@@ -1,4 +1,3 @@
-
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = 'https://pflcpzwwokcynwreqjho.supabase.co';
@@ -6,16 +5,18 @@ const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYm
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-async function checkProfiles() {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*');
+async function checkHR() {
+    console.log('Checking hr@gmail.com profile...');
+    const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('email', 'hr@gmail.com');
 
-  if (error) {
-    console.error('Error fetching profiles:', error);
-  } else {
-    console.log('Profiles:', JSON.stringify(data, null, 2));
-  }
+    if (error) {
+        console.error('Error:', error);
+    } else {
+        console.log('Profile:', JSON.stringify(data, null, 2));
+    }
 }
 
-checkProfiles();
+checkHR();

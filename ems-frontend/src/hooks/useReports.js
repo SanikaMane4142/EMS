@@ -17,3 +17,20 @@ export const useReviewReport = () => {
     },
   });
 };
+export const useTodayReport = (userId) => {
+  return useQuery({
+    queryKey: ['reports', 'today', userId],
+    queryFn: () => reportService.getTodayReport(userId),
+    enabled: !!userId,
+  });
+};
+
+export const useSubmitReport = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, reportData }) => reportService.submitDailyReport(userId, reportData),
+    onSuccess: (_, { userId }) => {
+      queryClient.invalidateQueries({ queryKey: ['reports', 'today', userId] });
+    },
+  });
+};

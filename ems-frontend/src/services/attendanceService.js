@@ -211,21 +211,68 @@ export const attendanceService = {
   },
 
   /**
+   * [HR/ADMIN] Get attendance counts for the last 7 days.
+   */
+  async getAttendanceTrends() {
+    const dates = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      dates.push(d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }));
+    }
+
+    const [attRes, profRes] = await Promise.all([
+      supabase.from('attendance').select('attendance_date, status').in('attendance_date', dates),
+      supabase.from('profiles').select('id', { count: 'exact', head: true })
+    ]);
+
+    if (attRes.error) throw attRes.error;
+    if (profRes.error) throw profRes.error;
+
+    const totalEmployees = profRes.count || 1;
+
+    return dates.map(date => {
+      const dayData = attRes.data.filter(r => r.attendance_date === date);
+      const presentCount = dayData.filter(r => ['punched_in', 'punched_out', 'auto_punched_out'].includes(r.status)).length;
+      const percentage = Math.round((presentCount / totalEmployees) * 100);
+      
+      return {
+        date,
+        label: new Date(date).toLocaleDateString([], { weekday: 'short' }),
+        value: percentage
+      };
+    });
+  },
+
+  /**
    * [HR/ADMIN] Get formatted list of today's attendance with profiles
    */
   async getAttendanceOverview(dateStr = null) {
     const today = dateStr || getTodayIST();
 
-    // 1. Get attendance records with profiles joined
+    // 1. Get attendance records with profiles and departments joined
     const { data: att, error: attErr } = await supabase
       .from('attendance')
-      .select('*, profiles(id, full_name, email, designation)')
+      .select(`
+        *,
+        profiles!user_id (
+          id,
+          full_name,
+          email,
+          designation,
+          departments!profiles_department_id_fkey (name)
+        )
+      `)
       .eq('attendance_date', today);
 
-    if (attErr) throw attErr;
+    if (attErr) {
+      console.error('[Attendance] Overview fetch error:', attErr.message);
+      throw attErr;
+    }
+    
     if (!att || att.length === 0) return [];
 
-    // 2. Format
+    // 2. Format for DataTable
     return att.map(item => {
       const p = item.profiles || {};
       const lunchMin = item.lunch_duration_ms ? Math.round(item.lunch_duration_ms / 60000) : 0;
@@ -233,11 +280,12 @@ export const attendanceService = {
         id: item.id,
         name: p.full_name || p.email || 'Unknown',
         email: p.email || '-',
-        dept: p.designation || 'Staff',
+        dept: p.departments?.name || p.designation || 'Staff',
         punchIn: item.punch_in_time ? new Date(item.punch_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-',
         punchOut: item.punch_out_time ? new Date(item.punch_out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-',
-        status: item.status === 'punched_in' ? 'Present' : (item.status === 'punched_out' ? 'Left' : 'Absent'),
-        lunchDuration: lunchMin
+        status: item.status === 'punched_in' ? 'Present' : (item.status === 'punched_out' || item.status === 'auto_punched_out' ? 'Left' : 'Absent'),
+        lunchDuration: lunchMin,
+        totalHours: item.total_hours || 0
       };
     });
   }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Box, Avatar, Skeleton } from '@mui/material';
-import { Users, UserCheck, UserX, Clock, AlertCircle, CalendarOff, UserPlus, FileText } from 'lucide-react';
+import { Users, UserCheck, UserX, Clock, CalendarOff, FileText } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import PageHeader from '../components/PageHeader';
 import { useAuth } from '../context/AuthContext';
@@ -9,7 +9,6 @@ import { supabase } from '../lib/supabaseClient';
 import { leaveService } from '../services/leaveService';
 import { profileService } from '../services/profileService';
 import { attendanceService } from '../services/attendanceService';
-import { departmentService } from '../services/departmentService';
 import { reportService } from '../services/reportService';
 
 const HRDashboard = () => {
@@ -20,27 +19,22 @@ const HRDashboard = () => {
   const [recentReports, setRecentReports] = useState([]);
   const [leaveStats, setLeaveStats] = useState({ pending: 0, approved: 0, rejected: 0 });
   const [kpiStats, setKpiStats] = useState({ total: 0, present: 0, absent: 0, late: 0 });
-  const [depts, setDepts] = useState([]);
-  const [recentJoiners, setRecentJoiners] = useState([]);
+
 
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
 
-      const [attendanceData, leaves, todayKpi, departmentStats, joiners, reports, allEmps] = await Promise.allSettled([
+      const [attendanceData, leaves, todayKpi, reports, allEmps] = await Promise.allSettled([
         attendanceService.getAttendanceOverview(),
         leaveService.getLeaveSummary(),
         attendanceService.getTodayStats(),
-        departmentService.getDepartmentStats(),
-        profileService.getRecentJoiners(),
         reportService.getTodayReports(),
         profileService.getAllEmployees()
       ]);
       
       setAttendance(attendanceData.status === 'fulfilled' ? (attendanceData.value || []) : []);
       setLeaveStats(leaves.status === 'fulfilled' ? (leaves.value || { pending: 0, approved: 0, rejected: 0 }) : { pending: 0, approved: 0, rejected: 0 });
-      setDepts(departmentStats.status === 'fulfilled' ? (departmentStats.value || []) : []);
-      setRecentJoiners(joiners.status === 'fulfilled' ? (joiners.value || []) : []);
       setRecentReports(reports.status === 'fulfilled' ? (reports.value || []) : []);
 
       const totalEmps = allEmps.status === 'fulfilled' ? (allEmps.value?.length || 0) : 0;
@@ -53,7 +47,7 @@ const HRDashboard = () => {
         late: 0
       });
 
-      const results = [attendanceData, leaves, todayKpi, departmentStats, joiners, reports];
+      const results = [attendanceData, leaves, todayKpi, reports];
       results.forEach((r, i) => {
         if (r.status === 'rejected') console.warn(`[HR Dashboard] Service ${i} failed:`, r.reason?.message);
       });
@@ -92,19 +86,12 @@ const HRDashboard = () => {
         <StatCard title="Late Arrivals" value={loading ? '...' : kpiStats.late.toString()} icon={Clock} color="#f59e0b" bgColor="#fffbeb" />
       </div>
 
-      {/* Alert Banner */}
-      <div className="alert-ems danger mb-6">
-        <AlertCircle size={16} />
-        <span className="flex-1"><strong>Real-time Monitoring Active:</strong> Dashboard reflects live database state.</span>
-        <button className="btn-ems btn-ems-secondary" style={{ height: 32, padding: '0 12px', fontSize: 12 }}>
-          Configure Alerts
-        </button>
-      </div>
+
 
       {/* Main Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-        {/* Attendance Table (2/3) */}
-        <div className="lg:col-span-2">
+      <div className="grid grid-cols-1 gap-6 mb-6">
+        {/* Attendance Table */}
+        <div>
           <Box className="card-ems-static" sx={{ overflow: 'hidden', height: '100%' }}>
             <Box sx={{ p: 3, pb: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
               <h3 className="text-base font-bold text-slate-900">Attendance Overview</h3>
@@ -162,63 +149,12 @@ const HRDashboard = () => {
           </Box>
         </div>
 
-        {/* Department Load (1/3) */}
-        <div>
-          <Box className="card-ems-static" sx={{ p: 3, height: '100%' }}>
-            <h3 className="text-base font-bold text-slate-900 mb-5">Department Load</h3>
-            <div className="flex flex-col gap-5">
-              {loading ? (
-                [1,2,3,4].map(i => <Skeleton key={i} variant="text" height={40} />)
-              ) : depts.length === 0 ? (
-                <p className="text-sm text-slate-400 text-center py-4">No departments found</p>
-              ) : depts.map((dept, i) => {
-                const pct = dept.total > 0 ? Math.round((dept.present / dept.total) * 100) : 0;
-                return (
-                  <div key={i}>
-                    <div className="flex justify-between items-center mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg">{dept.icon}</span>
-                        <span className="text-sm font-semibold">{dept.name}</span>
-                      </div>
-                      <span className="text-xs font-bold text-indigo-600">{pct}%</span>
-                    </div>
-                    <div className="progress-ems">
-                      <div className="progress-ems-fill" style={{ width: `${pct}%` }} />
-                    </div>
-                    <div className="flex justify-between mt-1.5 text-xs text-slate-400 font-medium">
-                      <span>{dept.present} Present</span>
-                      <span>{dept.total} Total</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </Box>
-        </div>
+
       </div>
 
       {/* Bottom Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Recent Joiners */}
-        <Box className="card-ems-static" sx={{ p: 3 }}>
-          <h3 className="text-base font-bold text-slate-900 flex items-center gap-2 mb-4"><UserPlus size={18} /> Recent Joiners</h3>
-          <div className="flex flex-col gap-3">
-            {loading ? (
-              [1,2,3].map(i => <Skeleton key={i} variant="rounded" height={60} />)
-            ) : recentJoiners.length === 0 ? (
-              <p className="text-sm text-slate-400 text-center py-4">No recent joiners</p>
-            ) : recentJoiners.map((person, i) => (
-              <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-slate-50 transition-all">
-                <Avatar sx={{ width: 40, height: 40, bgcolor: '#ecfdf5', color: '#10b981', fontWeight: 700, fontSize: 13 }}>{person.full_name?.charAt(0)}</Avatar>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-slate-900 truncate">{person.full_name}</p>
-                  <p className="text-xs text-slate-500 truncate">{person.departments?.name || 'Operations'}</p>
-                </div>
-                <span className="text-xs font-medium text-slate-400 whitespace-nowrap">{new Date(person.joined_at).toLocaleDateString([], { day: 'numeric', month: 'short' })}</span>
-              </div>
-            ))}
-          </div>
-        </Box>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
 
         {/* Leave Requests Summary */}
         <Box className="card-ems-static" sx={{ p: 3 }}>

@@ -6,8 +6,14 @@ import { supabase } from '../lib/supabaseClient';
  */
 const TASK_SELECT = `
   *,
-  task_groups ( id, title, is_completed, sort_order, subtasks ( id, title, is_completed, due_date, sort_order ) ),
-  assignee:profiles!assigned_to ( id, full_name, employee_id, department_id, departments!profiles_department_id_fkey ( name ) ),
+  task_groups ( 
+    id, title, is_completed, sort_order, updated_at, 
+    subtasks ( id, title, is_completed, due_date, sort_order, updated_at ) 
+  ),
+  assignee:profiles!assigned_to ( 
+    id, full_name, employee_id, department_id, 
+    departments!profiles_department_id_fkey ( name ) 
+  ),
   assigner:profiles!assigned_by ( id, full_name )
 `;
 
@@ -38,8 +44,83 @@ export const taskService = {
       .from('tasks')
       .select(TASK_SELECT)
       .order('created_at', { ascending: false });
-    if (error) throw error;
+    
+    if (error) {
+      console.error('[taskService] Error in getAllTasks:', error);
+      throw error;
+    }
+    console.log('[taskService] getAllTasks raw data:', data);
     return data || [];
+  },
+
+  async getTaskById(taskId) {
+    const { data, error } = await supabase
+      .from('tasks')
+      .select(TASK_SELECT)
+      .eq('id', taskId)
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async getSubtaskGroups(taskId) {
+    // 1. Fetch groups for this task
+    const { data: groups, error: groupsError } = await supabase
+      .from('task_groups')
+      .select('*')
+      .eq('task_id', taskId)
+      .order('sort_order', { ascending: true });
+    
+    if (!groups || groups.length === 0) {
+      console.log('[taskService] Direct group fetch returned no data, attempting fallback through tasks table...');
+      // Fallback: Fetch groups by joining through the tasks table (which HR has broader access to)
+      const { data: fallbackData, error: fallbackError } = await supabase
+        .from('tasks')
+        .select('task_groups(*)')
+        .eq('id', taskId)
+        .single();
+      
+      if (fallbackError) {
+        console.error('[taskService] Fallback fetch failed:', fallbackError);
+        return [];
+      }
+      
+      const fallbackGroups = fallbackData?.task_groups || [];
+      if (fallbackGroups.length === 0) return [];
+      
+      // If we found groups via fallback, fetch their subtasks too
+      const groupIds = fallbackGroups.map(g => g.id);
+      const { data: subtasks } = await supabase
+        .from('subtasks')
+        .select('*')
+        .in('group_id', groupIds)
+        .order('sort_order', { ascending: true });
+        
+      return fallbackGroups.map(g => ({
+        ...g,
+        subtasks: subtasks?.filter(s => s.group_id === g.id) || []
+      }));
+    }
+
+    // 2. Fetch all subtasks for these groups
+    const groupIds = groups.map(g => g.id);
+    const { data: subtasks, error: subtasksError } = await supabase
+      .from('subtasks')
+      .select('*')
+      .in('group_id', groupIds)
+      .order('sort_order', { ascending: true });
+
+    if (subtasksError) {
+      console.error('[taskService] Error fetching subtasks:', subtasksError);
+      // We still return groups even if subtasks fail
+      return groups.map(g => ({ ...g, subtasks: [] }));
+    }
+
+    // 3. Merge subtasks into their respective groups
+    return groups.map(g => ({
+      ...g,
+      subtasks: subtasks.filter(s => s.group_id === g.id)
+    }));
   },
 
   /** Activity log for a single task (HR view) */
@@ -172,9 +253,15 @@ export const taskService = {
   // ─────────────────────────────────────────────
 
   async addGroup(taskId, title) {
+    // Get current count to set sort_order
+    const { count } = await supabase
+      .from('task_groups')
+      .select('*', { count: 'exact', head: true })
+      .eq('task_id', taskId);
+
     const { data, error } = await supabase
       .from('task_groups')
-      .insert({ task_id: taskId, title, is_completed: false })
+      .insert({ task_id: taskId, title, is_completed: false, sort_order: count || 0 })
       .select('*, subtasks(*)')
       .single();
     if (error) throw error;
@@ -184,7 +271,7 @@ export const taskService = {
   async toggleGroup(groupId, isCompleted) {
     const { data, error } = await supabase
       .from('task_groups')
-      .update({ is_completed: isCompleted })
+      .update({ is_completed: isCompleted, updated_at: new Date().toISOString() })
       .eq('id', groupId)
       .select()
       .single();
@@ -193,9 +280,15 @@ export const taskService = {
   },
 
   async addSubtask(groupId, title, dueDate = null) {
+    // Get current count to set sort_order
+    const { count } = await supabase
+      .from('subtasks')
+      .select('*', { count: 'exact', head: true })
+      .eq('group_id', groupId);
+
     const { data, error } = await supabase
       .from('subtasks')
-      .insert({ group_id: groupId, title, due_date: dueDate })
+      .insert({ group_id: groupId, title, due_date: dueDate, sort_order: count || 0 })
       .select()
       .single();
     if (error) throw error;
@@ -205,12 +298,69 @@ export const taskService = {
   async toggleSubtask(subtaskId, isCompleted) {
     const { data, error } = await supabase
       .from('subtasks')
-      .update({ is_completed: isCompleted })
+      .update({ is_completed: isCompleted, updated_at: new Date().toISOString() })
       .eq('id', subtaskId)
       .select()
       .single();
     if (error) throw error;
     return data;
+  },
+
+  // ─────────────────────────────────────────────
+  // COMMENTS
+  // ─────────────────────────────────────────────
+
+  async getComments(taskId) {
+    const { data, error } = await supabase
+      .from('task_comments')
+      .select('*, author:profiles!author_id(full_name, avatar_url)')
+      .eq('task_id', taskId)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    return data || [];
+  },
+
+  async addComment(taskId, authorId, message) {
+    const { data, error } = await supabase
+      .from('task_comments')
+      .insert({ task_id: taskId, author_id: authorId, message })
+      .select('*, author:profiles!author_id(full_name, avatar_url)')
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async toggleCommentResolution(commentId, isResolved) {
+    const { data, error } = await supabase
+      .from('task_comments')
+      .update({ is_resolved: isResolved })
+      .eq('id', commentId)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  // ─────────────────────────────────────────────
+  // REORDERING (PERSISTENCE)
+  // ─────────────────────────────────────────────
+
+  async updateTaskOrder(orderedIds) {
+    const updates = orderedIds.map((id, idx) => ({ id, sort_order: idx }));
+    const { error } = await supabase.from('tasks').upsert(updates);
+    if (error) throw error;
+  },
+
+  async updateGroupOrder(orderedIds) {
+    const updates = orderedIds.map((id, idx) => ({ id, sort_order: idx }));
+    const { error } = await supabase.from('task_groups').upsert(updates);
+    if (error) throw error;
+  },
+
+  async updateSubtaskOrder(orderedIds) {
+    const updates = orderedIds.map((id, idx) => ({ id, sort_order: idx }));
+    const { error } = await supabase.from('subtasks').upsert(updates);
+    if (error) throw error;
   },
 
   // ─────────────────────────────────────────────
@@ -266,5 +416,35 @@ export const taskService = {
    */
   allSubtasksDone(taskGroups = []) {
     return taskGroups.length > 0 && taskGroups.every(g => g.isCompleted ?? g.is_completed);
+  },
+
+  /**
+   * Export tasks to CSV and trigger download.
+   * @param {Array} tasks — normalized task objects
+   * @param {string} filename — file name without extension
+   */
+  exportToCSV(tasks = [], filename = 'organization_tasks') {
+    const headers = ['Assignee', 'Employee ID', 'Task', 'Project', 'Department', 'Priority', 'Deadline', 'Progress', 'Status', 'Created At'];
+    const rows = tasks.map(t => [
+      t.assignedToName || 'Unassigned',
+      t.assignee?.employee_id || 'N/A',
+      `"${(t.title || '').replace(/"/g, '""')}"`,
+      t.project_name || 'Personal',
+      t.departmentName || 'General',
+      t.priority || 'Medium',
+      t.deadline ? new Date(t.deadline).toLocaleDateString('en-GB') : 'No deadline',
+      `${t.progress || 0}%`,
+      t.status || 'pending',
+      t.created_at ? new Date(t.created_at).toLocaleDateString('en-GB') : '',
+    ]);
+
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${filename}_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
   },
 };

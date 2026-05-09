@@ -25,6 +25,23 @@ export const useAllTasks = () =>
     staleTime: 30_000,
   });
 
+/** Detailed task info (including subtasks) for modal view */
+export const useTaskDetails = (taskId) =>
+  useQuery({
+    queryKey: ['tasks', 'detail', taskId],
+    queryFn: () => taskService.getTaskById(taskId),
+    enabled: !!taskId,
+    staleTime: 5_000,
+  });
+
+/** Subtask groups for a specific task */
+export const useTaskSubtasks = (taskId) =>
+  useQuery({
+    queryKey: ['task-subtasks', taskId],
+    queryFn: () => taskService.getSubtaskGroups(taskId),
+    enabled: !!taskId,
+  });
+
 /** Activity log for a single task (HR detail panel) */
 export const useTaskActivityLog = (taskId) =>
   useQuery({
@@ -125,5 +142,65 @@ export const useAddSubtask = () => {
     mutationFn: ({ groupId, title, dueDate }) =>
       taskService.addSubtask(groupId, title, dueDate),
     onSuccess: () => invalidateAll(qc),
+  });
+};
+
+/** Reorder top-level tasks */
+export const useUpdateTaskOrder = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (orderedIds) => taskService.updateTaskOrder(orderedIds),
+    onSuccess: () => invalidateAll(qc),
+  });
+};
+
+/** Reorder groups within a task */
+export const useUpdateGroupOrder = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (orderedIds) => taskService.updateGroupOrder(orderedIds),
+    onSuccess: () => invalidateAll(qc),
+  });
+};
+
+/** Reorder subtasks within a group */
+export const useUpdateSubtaskOrder = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (orderedIds) => taskService.updateSubtaskOrder(orderedIds),
+    onSuccess: () => invalidateAll(qc),
+  });
+};
+
+/** Comments for a task */
+export const useTaskComments = (taskId) => {
+  return useQuery({
+    queryKey: ['task-comments', taskId],
+    queryFn: () => taskService.getComments(taskId),
+    enabled: !!taskId,
+  });
+};
+
+/** Add a comment */
+export const useAddComment = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ taskId, authorId, message }) => 
+      taskService.addComment(taskId, authorId, message),
+    onSuccess: (_, { taskId }) => {
+      qc.invalidateQueries({ queryKey: ['task-comments', taskId] });
+    },
+  });
+};
+
+/** Toggle comment resolution status */
+export const useToggleCommentResolution = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ commentId, isResolved }) => 
+      taskService.toggleCommentResolution(commentId, isResolved),
+    onSuccess: (_, { taskId }) => {
+      qc.invalidateQueries({ queryKey: ['task-comments', taskId] });
+    },
   });
 };

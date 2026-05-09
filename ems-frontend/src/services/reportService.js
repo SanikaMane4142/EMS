@@ -26,6 +26,8 @@ export const reportService = {
         report_date: today,
         tasks_planned: reportData.tasks_planned,
         tasks_completed: reportData.tasks_completed,
+        auto_filled_planned_tasks: reportData.auto_filled_planned_tasks || [],
+        auto_filled_completed_tasks: reportData.auto_filled_completed_tasks || [],
         work_in_progress: reportData.work_in_progress,
         tomorrow_plan: reportData.tomorrow_plan,
         total_working_hours: reportData.total_working_hours,
@@ -229,7 +231,7 @@ export const reportService = {
    */
   async reviewReport(reportId, employeeId, reviewerId) {
     // 1. Update report status
-    const { data: report, error: reportErr } = await supabase
+    const { data: reports, error: reportErr } = await supabase
       .from('daily_reports')
       .update({
         status: 'reviewed',
@@ -237,10 +239,15 @@ export const reportService = {
         reviewed_at: new Date().toISOString()
       })
       .eq('id', reportId)
-      .select()
-      .single();
+      .select();
 
     if (reportErr) throw reportErr;
+    
+    if (!reports || reports.length === 0) {
+      throw new Error('Report not found or you do not have permission to review it.');
+    }
+
+    const report = reports[0];
 
     // 2. Create notification for the employee
     const { error: notifyErr } = await supabase

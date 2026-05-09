@@ -53,9 +53,6 @@ const EmployeeProfile = () => {
   return (
     <div>
       <PageHeader title="Employee Profile" subtitle={`Viewing details for ${employee.full_name || employee.email}`}>
-        <button className="btn-ems btn-ems-secondary" onClick={() => navigate(-1)}>
-          <ChevronLeft size={16} /> Back
-        </button>
         {(isHR || currentUser?.id === id) && (
           <button className="btn-ems btn-ems-primary" onClick={() => {
             setEditData({ ...employee });
@@ -97,6 +94,11 @@ const EmployeeProfile = () => {
 
         {/* Right: Detailed Info Tabs */}
         <div className="lg:col-span-3">
+          <div className="flex mb-4">
+            <button className="btn-ems btn-ems-secondary" onClick={() => navigate(-1)}>
+              <ChevronLeft size={16} /> Back
+            </button>
+          </div>
           <Box className="card-ems-static" sx={{ height: '100%', overflow: 'hidden' }}>
             <Box sx={{ borderBottom: 1, borderColor: 'divider', px: 2 }}>
               <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v)} variant="scrollable" scrollButtons="auto">
