@@ -85,3 +85,25 @@ export const useResumeWork = () => {
     },
   });
 };
+
+export const useStartOvertime = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (recordId) => attendanceService.startOvertime(recordId),
+    onSuccess: (data) => {
+      const userId = data.user_id;
+      queryClient.invalidateQueries({ queryKey: ['attendance', 'active', userId] });
+    },
+  });
+};
+
+export const useEndOvertime = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ recordId, startTime }) => attendanceService.endOvertime(recordId, startTime),
+    onSuccess: (data) => {
+      const userId = data.user_id;
+      queryClient.invalidateQueries({ queryKey: ['attendance', 'active', userId] });
+    },
+  });
+};

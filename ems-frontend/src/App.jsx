@@ -6,6 +6,7 @@ import { AuthProvider } from './context/AuthContext';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './lib/queryClient';
 import { GlobalErrorBoundary } from './components/GlobalErrorBoundary';
+import { Toaster } from 'react-hot-toast';
 
 // Pages
 import Login from './pages/Login';
@@ -66,6 +67,14 @@ const muiTheme = createTheme({
           fontWeight: 600,
         }
       }
+    },
+    MuiBackdrop: {
+      styleOverrides: {
+        root: {
+          backdropFilter: 'blur(8px)',
+          backgroundColor: 'rgba(15, 23, 42, 0.45)',
+        }
+      }
     }
   }
 });
@@ -80,6 +89,7 @@ function App() {
     <GlobalErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <RealtimeSyncManager />
+        <Toaster position="top-right" reverseOrder={false} />
         <ThemeProvider theme={muiTheme}>
           <CssBaseline />
           <AuthProvider>

@@ -7,6 +7,7 @@ import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
 import { useAttendanceOverview } from '../hooks/useAttendance';
 import { useDepartments } from '../hooks/useDepartments';
+import { useEmployees } from '../hooks/useEmployees';
 import { useAuth } from '../context/AuthContext';
 
 const Attendance = () => {
@@ -18,8 +19,10 @@ const Attendance = () => {
   
   const { data: attendance = [], isLoading: loadingAttendance } = useAttendanceOverview(dateStr);
   const { data: departments = [] } = useDepartments();
+  const { data: employees = [], isLoading: loadingEmployees } = useEmployees();
 
   const filtered = attendance.filter(a => deptFilter === 'all' || a.dept === deptFilter);
+  const filteredEmployees = employees.filter(e => deptFilter === 'all' || e.departments?.name === deptFilter);
 
   const adjustDate = (days) => {
     const next = new Date(currentDate);
@@ -39,7 +42,8 @@ const Attendance = () => {
       'Punch Out': row.punchOut,
       'Status': row.status,
       'Lunch (min)': row.lunchDuration || 0,
-      'Actual Work': row.totalHours > 0 ? `${row.totalHours}h` : '--'
+      'Actual Work': row.totalHours > 0 ? `${row.totalHours}h` : '--',
+      'Overtime': row.overtime > 0 ? `${row.overtime}h` : '--'
     }));
 
     // Create worksheet
@@ -73,8 +77,8 @@ const Attendance = () => {
       )
     },
     { field: 'dept', headerName: 'Department', flex: 1, minWidth: 150 },
-    { field: 'punchIn', headerName: 'Punch In', width: 120, align: 'center', headerAlign: 'center' },
-    { field: 'punchOut', headerName: 'Punch Out', width: 120, align: 'center', headerAlign: 'center' },
+    { field: 'punchIn', headerName: 'Punch In', width: 130, align: 'center', headerAlign: 'center' },
+    { field: 'punchOut', headerName: 'Punch Out', width: 130, align: 'center', headerAlign: 'center' },
     {
       field: 'status',
       headerName: 'Status',
@@ -105,11 +109,23 @@ const Attendance = () => {
   
   const columns = isAdmin ? [
     ...baseColumns,
-    { field: 'lunchDuration', headerName: 'Lunch (min)', width: 100, align: 'center', headerAlign: 'center' },
+    { field: 'lunchDuration', headerName: 'Lunch (min)', width: 120, align: 'center', headerAlign: 'center' },
+    { 
+      field: 'overtime', 
+      headerName: 'Overtime', 
+      width: 120, 
+      align: 'center', 
+      headerAlign: 'center',
+      renderCell: (params) => (
+        <span className="font-bold text-indigo-500">
+          {params.value > 0 ? `${params.value}h` : '--'}
+        </span>
+      )
+    },
     { 
       field: 'totalHours', 
       headerName: 'Actual Work', 
-      width: 120, 
+      width: 130, 
       align: 'center', 
       headerAlign: 'center',
       renderCell: (params) => (
@@ -120,12 +136,13 @@ const Attendance = () => {
     }
   ] : baseColumns;
 
-  // We no longer have the total number of employees in the overview query directly
-  // So we calculate present vs absent from the records we got for that day
-  const presentCount = attendance.filter(a => a.status === 'Present' || a.status === 'Left').length;
-  const totalRecords = attendance.length;
-  // If no records, total is 0. If there are records, it assumes all employees have an attendance record generated (even if absent).
-  const attendanceRate = totalRecords > 0 ? Math.round((presentCount / totalRecords) * 100) : 0;
+  // Calculate stats based on total employees vs actual records
+  const presentCount = filtered.filter(a => a.status === 'Present' || a.status === 'Left').length;
+  const totalEmployeesCount = filteredEmployees.length;
+  const absentCount = Math.max(0, totalEmployeesCount - presentCount);
+  const attendanceRate = totalEmployeesCount > 0 ? Math.round((presentCount / totalEmployeesCount) * 100) : 0;
+
+  const loadingStats = loadingAttendance || loadingEmployees;
 
   return (
     <div className="animate-in fade-in duration-500">
@@ -137,9 +154,9 @@ const Attendance = () => {
 
       {/* KPI Row */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-6">
-        <StatCard title="Present" value={loadingAttendance ? '...' : presentCount.toString()} icon={UserCheck} color="#10b981" bgColor="#ecfdf5" />
-        <StatCard title="Absent" value={loadingAttendance ? '...' : (totalRecords - presentCount).toString()} icon={UserX} color="#ef4444" bgColor="#fef2f2" />
-        <StatCard title="Attendance Rate" value={loadingAttendance ? '...' : `${attendanceRate}%`} icon={Clock} color="#f59e0b" bgColor="#fffbeb" />
+        <StatCard title="Present" value={loadingStats ? '...' : presentCount.toString()} icon={UserCheck} color="#10b981" bgColor="#ecfdf5" />
+        <StatCard title="Absent" value={loadingStats ? '...' : absentCount.toString()} icon={UserX} color="#ef4444" bgColor="#fef2f2" />
+        <StatCard title="Attendance Rate" value={loadingStats ? '...' : `${attendanceRate}%`} icon={Clock} color="#f59e0b" bgColor="#fffbeb" />
       </div>
 
       {/* Filters */}

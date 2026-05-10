@@ -99,7 +99,7 @@ export const getNavLinks = (dbRole) => {
       to: '/my-tasks',
       icon: CheckSquare,
       label: 'Tasks',
-      roles: ['super_admin', 'hr', 'employee'],
+      roles: ['employee'],
     },
     {
       to: '/organization-tasks',

@@ -7,7 +7,7 @@ const DataTable = ({ columns, data, onRowClick, emptyMessage = 'No data availabl
     return (
       <Box className="card-ems-static" sx={{ p: 4 }}>
         <div className="empty-state-ems">
-          <p className="text">{emptyMessage}</p>
+          <div className="text">{emptyMessage}</div>
         </div>
       </Box>
     );

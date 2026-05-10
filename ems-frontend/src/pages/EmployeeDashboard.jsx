@@ -2,17 +2,25 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Box, Avatar, Chip, Skeleton, Modal, TextField, Typography, Button } from '@mui/material';
+import { toast } from 'react-hot-toast';
 import { Clock, Play, Square, CheckCircle, AlertTriangle, Users, Calendar, FileText, Send, Save, ChevronRight, CheckSquare, Sparkles } from 'lucide-react';
 import StatCard from '../components/StatCard';
 
 // Hooks
-import { useActiveAttendance, useAttendanceHistory, usePunchIn, usePunchOut, useStartLunch, useResumeWork } from '../hooks/useAttendance';
+import { useActiveAttendance, useAttendanceHistory, usePunchIn, usePunchOut, useStartLunch, useResumeWork, useStartOvertime, useEndOvertime } from '../hooks/useAttendance';
 import { useTodayReport, useSubmitReport } from '../hooks/useReports';
 import { useMyLeaves } from '../hooks/useLeaves';
 import { useMyTasks } from '../hooks/useTasks';
 import { profileService } from '../services/profileService';
 import { reportService } from '../services/reportService';
 import { taskService } from '../services/taskService';
+import { communicationService } from '../services/communicationService';
+import { employeeService } from '../services/employeeService';
+import { supabase } from '../lib/supabaseClient';
+
+// New Components
+import CelebrationCard from '../components/CelebrationCard';
+import NoticeBoard from '../components/NoticeBoard';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -30,22 +38,24 @@ const calcElapsedMs = (rec) => {
   if (!rec?.punch_in_time) return 0;
   const now = Date.now();
   let diff = now - new Date(rec.punch_in_time).getTime();
-  
+
   if (rec.lunch_duration_ms) {
     diff -= rec.lunch_duration_ms;
   }
-  
+
   if (rec.lunch_start_time) {
     const ongoingLunchMs = now - new Date(rec.lunch_start_time).getTime();
     diff -= ongoingLunchMs;
   }
-  
+
   return diff > 0 ? diff : 0;
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SHIFT_MS = 8 * 60 * 60 * 1000; // 8 hours
+// const SHIFT_MS = 10 * 1000 // 8 hours
 const HALF_DAY_MS = 4 * 60 * 60 * 1000; // 4 hours
+// const HALF_DAY_MS = 5 * 1000;    // 5 seconds (must be less than SHIFT_MS)
 const LUNCH_LIMIT_MS = 60 * 60 * 1000; // 1 hour
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -64,13 +74,16 @@ const EmployeeDashboard = () => {
   const punchOutMutation = usePunchOut();
   // Note: we might need to add useStartLunch and useResumeWork to useAttendance.js if they don't exist
   // For now I'll assume they exist or I'll add them shortly.
-  
+
   // Local state for UI only
   const [elapsedMs, setElapsedMs] = useState(0);
   const [lunchElapsedMs, setLunchElapsedMs] = useState(0);
+  const [overtimeElapsedMs, setOvertimeElapsedMs] = useState(0);
   const [actionLoading, setActionLoading] = useState(false);
   const [teamMembers, setTeamMembers] = useState([]);
   const [birthdays, setBirthdays] = useState([]);
+  const [announcements, setAnnouncements] = useState([]);
+  const [todayCelebrations, setTodayCelebrations] = useState([]);
   const [reportData, setReportData] = useState({
     tasks_planned: '',
     tasks_completed: '',
@@ -96,24 +109,43 @@ const EmployeeDashboard = () => {
     }
   }, [todayReport]);
 
-  // ── Sync Team & Birthdays State ───────────────────────────────────────────
+  // ── Sync Team, Birthdays & Communications State ───────────────────────────
   useEffect(() => {
-    if (profile?.department_id) {
-      profileService.getDepartmentMembers(profile.department_id).then(setTeamMembers);
-    }
-    profileService.getUpcomingBirthdays().then(setBirthdays);
-  }, [profile?.department_id]);
+    // Fetch New Modules
+    communicationService.getLatestAnnouncements(5).then(setAnnouncements);
+    employeeService.getTodayCelebrations().then(setTodayCelebrations);
+
+    // Realtime subscription for announcements
+    const channel = supabase
+      .channel('employee_announcements')
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'announcements' 
+      }, () => {
+        communicationService.getLatestAnnouncements(5).then(setAnnouncements);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [profile?.id, profile?.department_id]);
 
   // ── Timer Logic ────────────────────────────────────────────────────────────
   const startTimer = (rec) => {
     stopTimer();
     setElapsedMs(calcElapsedMs(rec));
     setLunchElapsedMs(rec?.lunch_start_time ? Date.now() - new Date(rec.lunch_start_time).getTime() : 0);
+    setOvertimeElapsedMs(rec?.overtime_start_time ? Date.now() - new Date(rec.overtime_start_time).getTime() : 0);
 
     timerRef.current = setInterval(() => {
       setElapsedMs(calcElapsedMs(rec));
       if (rec?.lunch_start_time) {
         setLunchElapsedMs(Date.now() - new Date(rec.lunch_start_time).getTime());
+      }
+      if (rec?.overtime_start_time && !rec?.overtime_end_time) {
+        setOvertimeElapsedMs(Date.now() - new Date(rec.overtime_start_time).getTime());
       }
     }, 1000);
   };
@@ -133,10 +165,18 @@ const EmployeeDashboard = () => {
       const diffMs = new Date(record.punch_out_time) - new Date(record.punch_in_time);
       setElapsedMs(Math.max(0, diffMs - (record.lunch_duration_ms || 0)));
       setLunchElapsedMs(0);
+
+      // Handle overtime even if punched out
+      if (record.overtime_start_time && !record.overtime_end_time) {
+        startTimer(record);
+      } else if (record.overtime_duration_ms) {
+        setOvertimeElapsedMs(record.overtime_duration_ms);
+      }
     } else {
       stopTimer();
       setElapsedMs(0);
       setLunchElapsedMs(0);
+      setOvertimeElapsedMs(0);
     }
     return () => stopTimer();
   }, [record]);
@@ -157,24 +197,26 @@ const EmployeeDashboard = () => {
   const statusLabel = loading
     ? 'Loading...'
     : !record
-    ? 'Not Started'
-    : isLunchBreak
-    ? isLunchExceeded ? 'Lunch Exceeded' : 'On Lunch Break'
-    : isPunchedIn
-    ? isShiftComplete ? 'Shift Complete' : 'Working'
-    : 'Shift Ended';
+      ? 'Not Started'
+      : isLunchBreak
+        ? isLunchExceeded ? 'Lunch Exceeded' : 'On Lunch Break'
+        : isPunchedIn
+          ? isShiftComplete ? 'Shift Complete' : 'Working'
+          : 'Shift Ended';
 
   const timerDisplay = isPunchedIn
     ? formatMs(elapsedMs)
     : isCompleted
-    ? formatMs(elapsedMs) 
-    : '00:00:00';
+      ? formatMs(elapsedMs)
+      : '00:00:00';
 
   const borderColor = isPunchedIn ? (isLunchBreak ? (isLunchExceeded ? '#ef4444' : '#8b5cf6') : '#10b981') : isCompleted ? '#3b82f6' : '#f59e0b';
 
   // ── Handlers ──────────────────────────────────────────────────────────────
   const startLunchMutation = useStartLunch();
   const resumeWorkMutation = useResumeWork();
+  const startOvertimeMutation = useStartOvertime();
+  const endOvertimeMutation = useEndOvertime();
 
   const handlePunchIn = async () => {
     try {
@@ -191,8 +233,8 @@ const EmployeeDashboard = () => {
     if (!record?.id) return;
     try {
       setActionLoading(true);
-      await punchOutMutation.mutateAsync({ 
-        recordId: record.id, 
+      await punchOutMutation.mutateAsync({
+        recordId: record.id,
         punchInTime: record.punch_in_time,
         lunchDurationMs: record.lunch_duration_ms || 0
       });
@@ -207,8 +249,8 @@ const EmployeeDashboard = () => {
     if (!record?.id) return;
     try {
       setActionLoading(true);
-      await punchOutMutation.mutateAsync({ 
-        recordId: record.id, 
+      await punchOutMutation.mutateAsync({
+        recordId: record.id,
         punchInTime: record.punch_in_time,
         lunchDurationMs: record.lunch_duration_ms || 0
       });
@@ -253,24 +295,43 @@ const EmployeeDashboard = () => {
     }
   };
 
+  const handleStartOvertime = async () => {
+    if (!record?.id) return;
+    try {
+      setActionLoading(true);
+      await startOvertimeMutation.mutateAsync(record.id);
+    } catch (err) {
+      alert('Start overtime failed: ' + err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleEndOvertime = async () => {
+    if (!record?.id || !record?.overtime_start_time) return;
+    try {
+      setActionLoading(true);
+      await endOvertimeMutation.mutateAsync({
+        recordId: record.id,
+        startTime: record.overtime_start_time
+      });
+    } catch (err) {
+      alert('End overtime failed: ' + err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleReportSubmit = async (e) => {
     e.preventDefault();
     try {
       setActionLoading(true);
       await reportService.submitDailyReport(user.id, reportData);
       setReportSubmitted(true);
-      // Success feedback
-      const Toast = (await import('sweetalert2')).default.mixin({
-        toast: true,
-        position: 'top-end',
-        showConfirmButton: false,
-        timer: 3000,
-        timerProgressBar: true
-      });
-      Toast.fire({ icon: 'success', title: 'Today’s report submitted successfully.' });
+      toast.success('Today’s report submitted successfully.');
     } catch (err) {
       console.error('Report submission failed:', err);
-      alert('Report submission failed: ' + err.message);
+      toast.error('Report submission failed: ' + err.message);
     } finally {
       setActionLoading(false);
     }
@@ -280,8 +341,8 @@ const EmployeeDashboard = () => {
     const { name, value } = e.target;
     setReportData(prev => ({
       ...prev,
-      [name]: name === 'total_working_hours' ? parseFloat(value) : 
-             name === 'productivity_rating' ? parseInt(value) : value
+      [name]: name === 'total_working_hours' ? parseFloat(value) :
+        name === 'productivity_rating' ? parseInt(value) : value
     }));
   };
 
@@ -291,15 +352,15 @@ const EmployeeDashboard = () => {
       setActionLoading(true);
       const myTasks = await taskService.getMyTasks(user.id);
       // Only include tasks assigned to me by someone else that are currently "In Progress"
-      const inProgressTasks = myTasks.filter(t => 
-        t.status === 'in_progress' && 
-        t.assigned_to === user.id && 
+      const inProgressTasks = myTasks.filter(t =>
+        t.status === 'in_progress' &&
+        t.assigned_to === user.id &&
         t.assigned_by !== user.id
       );
-      
+
       const plannedItems = [];
       const completedItems = [];
-      
+
       inProgressTasks.forEach(task => {
         (task.task_groups || []).forEach(group => {
           // Rule: PLANNED - Only include subtask groups (not completed)
@@ -317,7 +378,7 @@ const EmployeeDashboard = () => {
               line: `- ${task.title} → ${group.title}`
             });
           }
-          
+
           // Mini-tasks for COMPLETED
           (group.subtasks || []).forEach(mini => {
             if (mini.is_completed) {
@@ -351,10 +412,10 @@ const EmployeeDashboard = () => {
         const newAutoCompletedIds = completedItems.map(i => i.id);
 
         // 3. Construct final values
-        const finalPlanned = (manualPlanned + (manualPlanned ? '\n\n' : '') + 
+        const finalPlanned = (manualPlanned + (manualPlanned ? '\n\n' : '') +
           (newPlannedLines.length > 0 ? PLANNED_HEADER + '\n' + newPlannedLines.join('\n') : '')).trim();
-        
-        const finalCompleted = (manualCompleted + (manualCompleted ? '\n\n' : '') + 
+
+        const finalCompleted = (manualCompleted + (manualCompleted ? '\n\n' : '') +
           (newCompletedLines.length > 0 ? COMPLETED_HEADER + '\n' + newCompletedLines.join('\n') : '')).trim();
 
         return {
@@ -366,10 +427,7 @@ const EmployeeDashboard = () => {
         };
       });
 
-      const Toast = (await import('sweetalert2')).default.mixin({
-        toast: true, position: 'top-end', showConfirmButton: false, timer: 2000
-      });
-      Toast.fire({ icon: 'info', title: 'Report auto-filled from tasks.' });
+      toast.success('Report auto-filled from tasks.');
     } catch (err) {
       console.error('[AutoFill] Error:', err);
     } finally {
@@ -382,10 +440,7 @@ const EmployeeDashboard = () => {
     try {
       setActionLoading(true);
       await reportService.submitDailyReport(user.id, reportData);
-      const Toast = (await import('sweetalert2')).default.mixin({
-        toast: true, position: 'top-end', showConfirmButton: false, timer: 2000
-      });
-      Toast.fire({ icon: 'success', title: 'Draft saved successfully.' });
+      toast.success('Draft saved successfully.');
     } catch (err) {
       console.error('Draft save failed:', err);
     } finally {
@@ -412,126 +467,167 @@ const EmployeeDashboard = () => {
       </Box>
 
       {/* Stats Row */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
         <StatCard title="Attendance Rate" value={loading ? '...' : '98%'} icon={Calendar} color="#4f46e5" bgColor="#eef2ff" trend="up" trendValue="+2%" />
         <StatCard title="Avg. Working Hours" value={loading ? '...' : '8.2h'} icon={Clock} color="#10b981" bgColor="#ecfdf5" />
         <StatCard title="Reports Submitted" value={loading ? '...' : `${history.length}`} icon={FileText} color="#f59e0b" bgColor="#fffbeb" />
         <StatCard title="Pending Tasks" value="3" icon={CheckCircle} color="#8b5cf6" bgColor="#f5f3ff" onClick={() => navigate('/my-tasks')} />
       </div>
 
+      {/* Celebration Section */}
+      <CelebrationCard celebrations={todayCelebrations} />
+
       {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* Left Column */}
         <div className="lg:col-span-3 flex flex-col gap-6">
 
-          {/* ── Attendance Status Card ── */}
-          <Box className="card-ems-static" sx={{ p: 3, borderLeft: `5px solid ${borderColor}` }}>
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          {/* ── Attendance Timer Section (3-State Workflow) ── */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-              {/* Left: status text */}
-              <div>
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Current Status</span>
-                <div className="flex items-center gap-2 mt-1">
-                  <span
-                    className={`w-2.5 h-2.5 rounded-full ${isPunchedIn ? 'bg-emerald-500' : 'bg-amber-400'}`}
-                    style={isPunchedIn ? { animation: 'pulseDot 2s infinite' } : {}}
+            {/* Card 1: Shift / Overtime Slot */}
+            <div className="relative overflow-hidden min-h-[220px]">
+              {!isCompleted ? (
+                <div className="card-ems-static h-full p-6 border-l-[6px] border-emerald-500 animate-in slide-in-from-left duration-500" style={{ borderRadius: '18px' }}>
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Shift Duration</span>
+                      <h3 className="text-xl font-extrabold text-slate-900">Regular Shift</h3>
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
+                      <Chip
+                        label={isPunchedIn ? (isShiftComplete ? "Shift Completed" : "Working") : "Not Started"}
+                        size="small"
+                        sx={{
+                          bgcolor: isPunchedIn ? (isShiftComplete ? '#dcfce7' : '#ecfdf5') : '#f1f5f9',
+                          color: isPunchedIn ? (isShiftComplete ? '#15803d' : '#10b981') : '#64748b',
+                          fontWeight: 800, fontSize: 10, height: 24
+                        }}
+                      />
+                      {record?.punch_in_time && (
+                        <span className="text-[10px] font-bold text-slate-400">IN: {new Date(record.punch_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="text-4xl font-black tracking-tighter text-slate-900 mb-6 flex items-baseline gap-2" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                    {timerDisplay}
+                    {isPunchedIn && !isShiftComplete && (
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    )}
+                  </div>
+
+                  {!record ? (
+                    <button className="btn-ems btn-ems-success w-full h-12 rounded-[14px]" onClick={handlePunchIn} disabled={actionLoading}>
+                      <Play size={18} /> {actionLoading ? 'Pinching In...' : 'Start Today’s Shift'}
+                    </button>
+                  ) : (
+                    <button
+                      className={`btn-ems w-full h-12 rounded-[14px] ${isShiftComplete ? 'btn-ems-danger shadow-lg shadow-red-100' : 'btn-ems-secondary'}`}
+                      onClick={isShiftComplete ? handleAutoPunchOut : handlePunchOut}
+                      disabled={actionLoading || (isPunchedIn && !isHalfDayComplete)}
+                    >
+                      <Square size={18} /> {isShiftComplete ? 'Punch Out (Completed)' : 'Punch Out'}
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="card-ems-static h-full p-6 border-l-[6px] border-indigo-500 animate-in fade-in zoom-in duration-500" style={{ borderRadius: '18px' }}>
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest block mb-1">Post-Shift Tracking</span>
+                      <h3 className="text-xl font-extrabold text-slate-900">Overtime Session</h3>
+                    </div>
+                    <Chip
+                      label={record.overtime_start_time && !record.overtime_end_time ? "Overtime Active" : "Day Completed"}
+                      size="small"
+                      sx={{
+                        bgcolor: record.overtime_start_time && !record.overtime_end_time ? '#e0e7ff' : '#f1f5f9',
+                        color: record.overtime_start_time && !record.overtime_end_time ? '#4f46e5' : '#64748b',
+                        fontWeight: 800, fontSize: 10, height: 24
+                      }}
+                    />
+                  </div>
+
+                  <div className="text-4xl font-black tracking-tighter text-slate-900 mb-6 flex items-baseline gap-2" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                    {formatMs(overtimeElapsedMs)}
+                    {record.overtime_start_time && !record.overtime_end_time && (
+                      <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+                    )}
+                  </div>
+
+                  {!record.overtime_start_time ? (
+                    <button className="btn-ems btn-ems-primary w-full h-12 rounded-[14px]" style={{ background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)' }} onClick={handleStartOvertime} disabled={actionLoading}>
+                      <Play size={18} /> Start Overtime
+                    </button>
+                  ) : !record.overtime_end_time ? (
+                    <button className="btn-ems btn-ems-danger w-full h-12 rounded-[14px]" onClick={handleEndOvertime} disabled={actionLoading}>
+                      <Square size={18} /> End Overtime
+                    </button>
+                  ) : (
+                    <div className="flex items-center justify-center gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                      <CheckCircle size={18} className="text-emerald-500" />
+                      <span className="text-sm font-bold text-slate-700">Total OT: {formatMs(record.overtime_duration_ms)}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Card 2: Lunch Break (Visible anytime during active shift) */}
+            <div className={`transition-all duration-500 ${isPunchedIn && !isCompleted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}`}>
+              <div className="card-ems-static h-full p-6 border-l-[6px] border-amber-500" style={{ borderRadius: '18px' }}>
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest block mb-1">Rest & Recovery</span>
+                    <h3 className="text-xl font-extrabold text-slate-900">Lunch Break</h3>
+                  </div>
+                  <Chip
+                    label={isLunchBreak ? "On Break" : "Shift Active"}
+                    size="small"
+                    sx={{
+                      bgcolor: isLunchBreak ? '#fffbeb' : '#f1f5f9',
+                      color: isLunchBreak ? '#b45309' : '#64748b',
+                      fontWeight: 800, fontSize: 10, height: 24
+                    }}
                   />
-                  <h2 className="text-xl font-extrabold text-slate-900">{statusLabel}</h2>
                 </div>
-                {record?.punch_in_time && (
-                  <p className="text-xs text-slate-500 font-medium mt-1">
-                    Punched in at {new Date(record.punch_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </p>
-                )}
-                {isCompleted && (
-                  <p className="text-xs text-emerald-600 font-semibold mt-1">
-                    ✓ Attendance completed for today
-                  </p>
-                )}
-              </div>
 
-              {/* Center: Timer */}
-              <div className="flex flex-col items-center">
-                <div
-                  className={`text-3xl font-extrabold tracking-tight ${isLunchBreak ? (isLunchExceeded ? 'text-red-600' : 'text-purple-600') : 'text-slate-900'}`}
-                  style={{ fontFamily: "'JetBrains Mono', monospace" }}
-                >
-                  {isLunchBreak ? formatMs(lunchElapsedMs) : timerDisplay}
+                <div className="text-4xl font-black tracking-tighter text-slate-900 mb-6 flex items-baseline gap-2" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                  {formatMs(lunchElapsedMs)}
+                  {isLunchBreak && (
+                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                  )}
                 </div>
-                {isLunchBreak && !isLunchExceeded && (
-                  <span className="text-[10px] font-bold text-purple-500 mt-1 uppercase tracking-tighter">
-                    Lunch Break ({formatMs(Math.max(0, LUNCH_LIMIT_MS - lunchElapsedMs))} remaining)
-                  </span>
-                )}
-                {isLunchExceeded && (
-                  <span className="text-[10px] font-bold text-red-600 mt-1 uppercase tracking-tighter">
-                    Lunch Limit Exceeded! Please resume work.
-                  </span>
-                )}
-                {isPunchedIn && !isLunchBreak && !isHalfDayComplete && (
-                  <span className="text-[10px] font-bold text-amber-600 mt-1 uppercase tracking-tighter">
-                    {formatMs(Math.max(0, HALF_DAY_MS - elapsedMs))} until half-day
-                  </span>
-                )}
-                {isPunchedIn && !isLunchBreak && isHalfDayComplete && !isShiftComplete && (
-                  <span className="text-[10px] font-bold text-amber-600 mt-1 uppercase tracking-tighter">
-                    {formatMs(remainingMs)} remaining for full shift
-                  </span>
-                )}
-                {isPunchedIn && !isLunchBreak && isShiftComplete && (
-                  <span className="text-[10px] font-bold text-emerald-600 mt-1 uppercase tracking-tighter">
-                    Shift complete — auto punch out available
-                  </span>
-                )}
-              </div>
 
-              {/* Right: Action button */}
-              <div className="flex flex-col gap-2 sm:items-end">
                 {isLunchBreak ? (
                   <button
-                    className={`btn-ems ${isLunchExceeded ? 'btn-ems-danger' : 'btn-ems-primary'}`}
+                    className={`btn-ems w-full h-12 rounded-[14px] ${isLunchExceeded ? 'btn-ems-danger' : 'btn-ems-primary'}`}
                     onClick={onResumeClick}
-                    disabled={loading || actionLoading}
-                    style={{ minWidth: 160, height: 48, background: isLunchExceeded ? '#ef4444' : '#8b5cf6', color: '#fff', border: 'none' }}
+                    disabled={actionLoading}
+                    style={{ background: isLunchExceeded ? '#ef4444' : '#f59e0b', border: 'none' }}
                   >
-                    {actionLoading ? 'Please wait...' : <><Play size={18} /> Resume Work</>}
+                    <Play size={18} /> {isLunchExceeded ? 'Resume Work (Overdue)' : 'Resume Work'}
                   </button>
                 ) : (
-                  <>
-                    <button
-                      className={`btn-ems ${!record ? 'btn-ems-success' : isPunchedIn ? 'btn-ems-danger' : 'btn-ems-secondary'}`}
-                      onClick={!record ? handlePunchIn : isPunchedIn ? (isShiftComplete ? handleAutoPunchOut : handlePunchOut) : undefined}
-                      disabled={
-                        loading ||
-                        actionLoading ||
-                        isCompleted ||
-                        (isPunchedIn && !isHalfDayComplete)
-                      }
-                      style={{ minWidth: 160, height: 48 }}
-                    >
-                      {actionLoading
-                        ? 'Please wait...'
-                        : !record
-                        ? <><Play size={18} /> Punch In</>
-                        : isPunchedIn
-                        ? (isShiftComplete ? <><Square size={18} /> Auto Punch Out</> : <><Square size={18} /> Punch Out</>)
-                        : <><CheckCircle size={18} /> Done for Today</>}
-                    </button>
-                    {isPunchedIn && !isCompleted && !record?.lunch_end_time && (
-                      <button
-                        className="flex items-center justify-center gap-2 px-4 py-2 rounded-full font-bold text-amber-900 bg-gradient-to-r from-amber-200 to-amber-400 hover:from-amber-300 hover:to-amber-500 shadow-md hover:shadow-lg transition-all duration-300 ease-in-out transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-md"
-                        onClick={handleStartLunch}
-                        disabled={loading || actionLoading || isShiftComplete}
-                        style={{ minWidth: 160, height: 38, fontSize: '0.85rem' }}
-                      >
-                        <Clock size={16} /> Start Lunch Break
-                      </button>
-                    )}
-                  </>
+                  <button
+                    className="btn-ems btn-ems-secondary w-full h-12 rounded-[14px]"
+                    onClick={handleStartLunch}
+                    disabled={actionLoading || isShiftComplete}
+                  >
+                    <Clock size={18} /> Start Lunch Break
+                  </button>
+                )}
+
+                {isLunchBreak && (
+                  <span className="text-[10px] font-bold text-amber-600 mt-3 block text-center uppercase tracking-tight">
+                    {isLunchExceeded ? "Limit exceeded by " + formatMs(lunchElapsedMs - LUNCH_LIMIT_MS) : formatMs(Math.max(0, LUNCH_LIMIT_MS - lunchElapsedMs)) + " remaining"}
+                  </span>
                 )}
               </div>
             </div>
-          </Box>
+
+          </div>
 
           {/* ── Daily Report ── */}
           <Box className="card-ems-static" sx={{ p: 3 }}>
@@ -541,8 +637,8 @@ const EmployeeDashboard = () => {
               </h3>
               <div className="flex items-center gap-2">
                 {!reportSubmitted && (
-                  <button 
-                    type="button" 
+                  <button
+                    type="button"
                     className="text-[10px] font-black text-indigo-600 uppercase tracking-widest flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-all"
                     onClick={handleAutoFill}
                     disabled={actionLoading}
@@ -560,79 +656,81 @@ const EmployeeDashboard = () => {
 
             {!reportSubmitted ? (
               <form onSubmit={handleReportSubmit}>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-7 mb-7">
                   {/* Column 1: Planned and Completed */}
-                  <div className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-7">
                     <div>
-                      <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Tasks Planned Today</label>
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-2.5">Tasks Planned Today</label>
                       <textarea
-                        name="tasks_planned" className="form-input-ems" placeholder="List tasks planned for today..."
-                        value={reportData.tasks_planned} onChange={handleReportChange} rows="3" style={{ resize: 'none' }} required
+                        name="tasks_planned" className="form-input-premium" placeholder="List tasks planned for today..."
+                        value={reportData.tasks_planned} onChange={handleReportChange} style={{ resize: 'none', minHeight: '140px' }} required
                       />
                     </div>
                     <div>
-                      <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Tasks Completed</label>
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-2.5">Tasks Completed</label>
                       <textarea
-                        name="tasks_completed" className="form-input-ems" placeholder="List completed tasks..."
-                        value={reportData.tasks_completed} onChange={handleReportChange} rows="3" style={{ resize: 'none' }} required
+                        name="tasks_completed" className="form-input-premium" placeholder="List completed tasks..."
+                        value={reportData.tasks_completed} onChange={handleReportChange} style={{ resize: 'none', minHeight: '170px' }} required
                       />
                     </div>
                   </div>
 
                   {/* Column 2: WIP and Tomorrow */}
-                  <div className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-7">
                     <div>
-                      <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Work In Progress</label>
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-2.5">Work In Progress</label>
                       <textarea
-                        name="work_in_progress" className="form-input-ems" placeholder="Mention ongoing tasks..."
-                        value={reportData.work_in_progress} onChange={handleReportChange} rows="3" style={{ resize: 'none' }}
+                        name="work_in_progress" className="form-input-premium" placeholder="Mention ongoing tasks..."
+                        value={reportData.work_in_progress} onChange={handleReportChange} style={{ resize: 'none', minHeight: '140px' }}
                       />
                     </div>
                     <div>
-                      <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Tomorrow Plan</label>
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-2.5">Tomorrow Plan</label>
                       <textarea
-                        name="tomorrow_plan" className="form-input-ems" placeholder="Plan for tomorrow..."
-                        value={reportData.tomorrow_plan} onChange={handleReportChange} rows="3" style={{ resize: 'none' }} required
+                        name="tomorrow_plan" className="form-input-premium" placeholder="Plan for tomorrow..."
+                        value={reportData.tomorrow_plan} onChange={handleReportChange} style={{ resize: 'none', minHeight: '170px' }} required
                       />
                     </div>
                   </div>
                 </div>
 
                 {/* Metrics Row */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-7 mb-7">
                   <div>
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Total Working Hours</label>
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-2.5">Total Working Hours</label>
                     <input
-                      type="number" name="total_working_hours" className="form-input-ems"
+                      type="number" name="total_working_hours" className="form-input-premium"
                       min="0" max="24" step="0.5" value={reportData.total_working_hours} onChange={handleReportChange} required
+                      style={{ height: '52px' }}
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Productivity Rating (1-10)</label>
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-2.5">Productivity Rating (1-10)</label>
                     <select
-                      name="productivity_rating" className="form-select-ems"
+                      name="productivity_rating" className="form-input-premium"
                       value={reportData.productivity_rating} onChange={handleReportChange}
+                      style={{ height: '52px' }}
                     >
-                      {[1,2,3,4,5,6,7,8,9,10].map(n => <option key={n} value={n}>{n} - {n <= 3 ? 'Low' : n <= 7 ? 'Good' : 'Excellent'}</option>)}
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => <option key={n} value={n}>{n} - {n <= 3 ? 'Low' : n <= 7 ? 'Good' : 'Excellent'}</option>)}
                     </select>
                   </div>
                 </div>
 
                 {/* Notes */}
-                <div className="mb-5">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Additional Notes</label>
+                <div className="mb-7">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-2.5">Additional Notes</label>
                   <textarea
-                    name="additional_notes" className="form-input-ems" placeholder="Any extra notes..."
-                    value={reportData.additional_notes} onChange={handleReportChange} rows="2" style={{ resize: 'none' }}
+                    name="additional_notes" className="form-input-premium" placeholder="Any extra notes..."
+                    value={reportData.additional_notes} onChange={handleReportChange} style={{ resize: 'none', minHeight: '110px' }}
                   />
                 </div>
 
-                <div className="flex gap-2">
-                  <button type="submit" className="btn-ems btn-ems-primary flex-1" disabled={actionLoading}>
-                    <Send size={16} /> {actionLoading ? 'Submitting...' : 'Submit Today’s Report'}
+                <div className="flex gap-3">
+                  <button type="submit" className="btn-ems btn-ems-primary flex-1" style={{ height: '52px', borderRadius: '14px' }} disabled={actionLoading}>
+                    <Send size={18} /> {actionLoading ? 'Submitting...' : 'Submit Today’s Report'}
                   </button>
-                  <button type="button" className="btn-ems btn-ems-secondary" style={{ width: 130 }} onClick={handleSaveDraft} disabled={actionLoading}>
-                    <Save size={16} /> Save Draft
+                  <button type="button" className="btn-ems btn-ems-secondary" style={{ width: 160, height: '52px', borderRadius: '14px' }} onClick={handleSaveDraft} disabled={actionLoading}>
+                    <Save size={18} /> Save Draft
                   </button>
                 </div>
               </form>
@@ -642,7 +740,7 @@ const EmployeeDashboard = () => {
                   <CheckCircle size={16} />
                   <span>Today’s report submitted successfully. You can review your summary below.</span>
                 </div>
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
                     <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Planned Today</p>
@@ -674,7 +772,7 @@ const EmployeeDashboard = () => {
                 </div>
 
                 <button className="text-sm font-semibold text-indigo-600 hover:underline flex items-center gap-1 justify-center mt-2" onClick={() => setReportSubmitted(false)}>
-                   Update Today's Report
+                  Update Today's Report
                 </button>
               </div>
             )}
@@ -729,6 +827,9 @@ const EmployeeDashboard = () => {
 
         {/* Right Column */}
         <div className="lg:col-span-2 flex flex-col gap-6">
+
+          {/* Notice Board */}
+          <NoticeBoard announcements={announcements} />
 
           {/* Team Status */}
           <Box className="card-ems-static" sx={{ p: 3 }}>
@@ -858,10 +959,10 @@ const EmployeeDashboard = () => {
             <Button variant="outlined" onClick={() => setShowResumeModal(false)}>
               Cancel
             </Button>
-            <Button 
-              variant="contained" 
-              color="error" 
-              disabled={!resumeReason.trim() || actionLoading} 
+            <Button
+              variant="contained"
+              color="error"
+              disabled={!resumeReason.trim() || actionLoading}
               onClick={() => handleResumeWork(resumeReason)}
             >
               {actionLoading ? 'Submitting...' : 'Submit & Resume'}

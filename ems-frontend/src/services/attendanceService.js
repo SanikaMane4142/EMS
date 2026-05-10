@@ -176,6 +176,47 @@ export const attendanceService = {
   },
 
   /**
+   * Start Overtime — marks the start of overtime.
+   */
+  async startOvertime(recordId) {
+    const now = new Date();
+    const { data, error } = await supabase
+      .from('attendance')
+      .update({
+        overtime_start_time: now.toISOString(),
+      })
+      .eq('id', recordId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    console.log('[Attendance] Started overtime at', now.toISOString());
+    return data;
+  },
+
+  /**
+   * End Overtime — calculates duration and updates record.
+   */
+  async endOvertime(recordId, overtimeStartTime) {
+    const now = new Date();
+    const durationMs = now - new Date(overtimeStartTime);
+
+    const { data, error } = await supabase
+      .from('attendance')
+      .update({
+        overtime_end_time: now.toISOString(),
+        overtime_duration_ms: durationMs,
+      })
+      .eq('id', recordId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    console.log('[Attendance] Ended overtime. Duration MS:', durationMs);
+    return data;
+  },
+
+  /**
    * Get recent attendance history for the employee.
    */
   async getAttendanceHistory(userId, limit = 10) {
@@ -285,7 +326,8 @@ export const attendanceService = {
         punchOut: item.punch_out_time ? new Date(item.punch_out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-',
         status: item.status === 'punched_in' ? 'Present' : (item.status === 'punched_out' || item.status === 'auto_punched_out' ? 'Left' : 'Absent'),
         lunchDuration: lunchMin,
-        totalHours: item.total_hours || 0
+        totalHours: item.total_hours || 0,
+        overtime: item.overtime_duration_ms ? parseFloat((item.overtime_duration_ms / 3600000).toFixed(2)) : 0
       };
     });
   }

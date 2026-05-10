@@ -6,38 +6,59 @@ import PageHeader from '../components/PageHeader';
 import { leaveService } from '../services/leaveService';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabaseClient';
+import { toast } from 'react-hot-toast';
 import Swal from 'sweetalert2';
 
 const MyLeaves = () => {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [showApplyDialog, setShowApplyDialog] = useState(false);
   const [activeFilter, setActiveFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [leaves, setLeaves] = useState([]);
-  
-  const [formData, setFormData] = useState({ 
-    type: 'Annual', 
-    start: '', 
-    end: '', 
-    reason: '' 
+  const [balances, setBalances] = useState(null);
+  const [isProbation, setIsProbation] = useState(false);
+
+  const [formData, setFormData] = useState({
+    type: 'casual_leave',
+    start: '',
+    end: '',
+    reason: '',
+    medicalFile: null
   });
 
-  const balances = [
-    { type: 'Annual', total: 12, used: 2, color: '#4f46e5', bg: '#f5f3ff', icon: Calendar },
-    { type: 'Sick', total: 10, used: 3, color: '#ef4444', bg: '#fef2f2', icon: AlertCircle },
-    { type: 'Unpaid', total: 0, used: 0, color: '#64748b', bg: '#f1f5f9', icon: Clock },
-  ];
+  const [durationPreview, setDurationPreview] = useState({ totalDays: 0, isSandwich: false });
+
+  const leaveTypeConfig = {
+    'casual_leave': { label: 'Casual Leave (CL)', color: '#4f46e5', bg: '#f5f3ff', icon: Calendar, max: 20 },
+    'sick_leave': { label: 'Medical/Sick Leave (ML/SL)', color: '#ef4444', bg: '#fef2f2', icon: AlertCircle, max: 6 },
+    'optional_leave': { label: 'Optional Leave', color: '#f59e0b', bg: '#fffbeb', icon: Clock, max: 2 },
+    'lwp': { label: 'Leave Without Pay (LWP)', color: '#64748b', bg: '#f1f5f9', icon: Clock, max: 0 }
+  };
 
   // 1. Fetch History on Mount
   const fetchHistory = async () => {
     try {
       if (user?.id) {
-        const data = await leaveService.getMyLeaves(user.id);
-        setLeaves(data);
+        const [history, balData] = await Promise.all([
+          leaveService.getMyLeaves(user.id),
+          leaveService.getLeaveBalances(user.id)
+        ]);
+        setLeaves(history);
+        setBalances(balData);
+
+        // Probation Detection: 3 months from joining_date
+        if (profile?.joining_date) {
+          const joinDate = new Date(profile.joining_date);
+          const probationEnd = new Date(joinDate);
+          probationEnd.setMonth(joinDate.getMonth() + 3);
+          setIsProbation(new Date() < probationEnd);
+        }
       }
     } catch (err) {
       console.error('Failed to fetch leaves:', err);
+      toast.error('Failed to load leave history');
     } finally {
       setLoading(false);
     }
@@ -45,67 +66,60 @@ const MyLeaves = () => {
 
   useEffect(() => {
     fetchHistory();
+  }, [user?.id, profile?.joining_date]);
 
-    // REALTIME: Listen for status changes on my requests
-    if (user?.id) {
-      const channel = supabase
-        .channel('my_leave_updates')
-        .on(
-          'postgres_changes',
-          { 
-            event: '*', 
-            schema: 'public', 
-            table: 'leave_requests', 
-            filter: `user_id=eq.${user.id}` 
-          },
-          () => fetchHistory()
-        )
-        .subscribe();
+  // Real-time duration preview
+  useEffect(() => {
+    const updatePreview = async () => {
+      if (formData.start && formData.end) {
+        const res = await leaveService.calculateLeaveDays(formData.start, formData.end);
+        setDurationPreview(res);
+      } else {
+        setDurationPreview({ totalDays: 0, isSandwich: false });
+      }
+    };
+    updatePreview();
+  }, [formData.start, formData.end]);
 
-      return () => {
-        supabase.removeChannel(channel);
-      };
-    }
-  }, [user?.id]);
-
-
-  // 2. Form Handlers
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const calculateDays = () => {
-    if (!formData.start || !formData.end) return 0;
-    const start = new Date(formData.start);
-    const end = new Date(formData.end);
-    const diff = end - start;
-    const days = Math.ceil(diff / (1000 * 60 * 60 * 24)) + 1;
-    return days > 0 ? days : 0;
-  };
-
   const handleSubmit = async () => {
     if (!formData.start || !formData.end || !formData.reason) {
-      return Swal.fire('Error', 'Please fill all fields', 'error');
+      return toast.error('Please fill all fields');
+    }
+
+    // Medical Doc check for SL >= 2 days
+    if (formData.type === 'sick_leave' && durationPreview.totalDays >= 2 && !formData.medicalFile) {
+      return toast.error('Medical Proof Required: Sick leave for 2+ days requires a certificate.');
     }
 
     try {
-      setLoading(true);
+      setSubmitting(true);
+      let medicalUrl = null;
+
+      if (formData.medicalFile) {
+        medicalUrl = await leaveService.uploadMedicalCert(formData.medicalFile, user.id);
+      }
+
       await leaveService.applyLeave(user.id, {
         leave_type: formData.type,
         start_date: formData.start,
         end_date: formData.end,
-        reason: formData.reason
+        reason: formData.reason,
+        medical_doc_url: medicalUrl
       });
-      
-      Swal.fire('Success', 'Leave request submitted!', 'success');
+
+      toast.success('Leave request submitted!');
       setShowApplyDialog(false);
-      setFormData({ type: 'Annual', start: '', end: '', reason: '' });
-      fetchHistory(); // Refresh table
+      setFormData({ type: 'casual_leave', start: '', end: '', reason: '', medicalFile: null });
+      fetchHistory();
     } catch (err) {
-      Swal.fire('Error', err.message, 'error');
+      toast.error(err.message || 'Failed to submit request');
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
@@ -126,24 +140,28 @@ const MyLeaves = () => {
 
       {/* Leave Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
-        {balances.map((leave, i) => {
-          const Icon = leave.icon;
-          const usage = (leave.used / leave.total) * 100;
+        {balances && Object.entries(leaveTypeConfig).filter(([key]) => key !== 'lwp').map(([key, config]) => {
+          const used = key === 'casual_leave' ? balances.cl_used : key === 'sick_leave' ? balances.sl_used : balances.ol_used;
+          const total = key === 'casual_leave' ? balances.cl_total + balances.cl_carried : key === 'sick_leave' ? balances.sl_total : balances.ol_total;
+          const remaining = total - used;
+          const usage = (used / total) * 100;
+          const Icon = config.icon;
+
           return (
-            <Box key={i} className="card-ems" sx={{ p: 3 }}>
+            <Box key={key} className="card-ems" sx={{ p: 3 }}>
               <div className="flex justify-between items-start mb-4">
-                <div className="w-11 h-11 rounded-xl flex items-center justify-center" style={{ background: leave.bg, color: leave.color }}>
+                <div className="w-11 h-11 rounded-xl flex items-center justify-center" style={{ background: config.bg, color: config.color }}>
                   <Icon size={20} />
                 </div>
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Used: {leave.used} / {leave.total}</span>
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Used: {used} / {total}</span>
               </div>
-              <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">{leave.type}</h3>
+              <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">{config.label}</h3>
               <div className="flex items-baseline gap-1.5 mb-4">
-                <span className="text-3xl font-black text-slate-900">{leave.total - leave.used}</span>
+                <span className="text-3xl font-black text-slate-900">{remaining}</span>
                 <span className="text-xs font-bold text-slate-400">Days Available</span>
               </div>
               <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                <div className="h-full rounded-full transition-all duration-1000" style={{ width: `${usage}%`, backgroundColor: leave.color }} />
+                <div className="h-full rounded-full transition-all duration-1000" style={{ width: `${usage}%`, backgroundColor: config.color }} />
               </div>
             </Box>
           );
@@ -161,7 +179,9 @@ const MyLeaves = () => {
             </div>
             <select className="form-select-ems !h-9 !text-xs" onChange={(e) => setActiveFilter(e.target.value)}>
               <option value="All">All Types</option>
-              {balances.map(b => <option key={b.type} value={b.type}>{b.type}</option>)}
+              {Object.entries(leaveTypeConfig).map(([key, config]) => (
+                <option key={key} value={key}>{config.label}</option>
+              ))}
             </select>
             <select className="form-select-ems !h-9 !text-xs" onChange={(e) => setStatusFilter(e.target.value)}>
               <option value="All">All Status</option>
@@ -177,14 +197,17 @@ const MyLeaves = () => {
             const start = new Date(item.start_date);
             const end = new Date(item.end_date);
             const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
-            
+
             return (
               <div key={item.id} className="flex items-center justify-between p-4 border border-slate-100 rounded-2xl hover:bg-slate-50 transition-all group">
                 <div className="flex items-center gap-6 flex-1">
-                  <div className="w-1.5 h-10 rounded-full" style={{ background: balances.find(b => b.type === item.leave_type)?.color || '#4f46e5' }} />
+                  <div className="w-1.5 h-10 rounded-full" style={{ background: leaveTypeConfig[item.leave_type]?.color || '#4f46e5' }} />
                   <div className="min-w-[120px]">
-                    <h4 className="text-sm font-bold text-slate-900">{item.leave_type}</h4>
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{days} {days > 1 ? 'Days' : 'Day'}</span>
+                    <h4 className="text-sm font-bold text-slate-900">{leaveTypeConfig[item.leave_type]?.label || item.leave_type}</h4>
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{item.total_days || days} {(item.total_days || days) > 1 ? 'Days' : 'Day'}</span>
+                    {item.is_sandwich_applied && (
+                      <Chip label="Sandwich" size="small" sx={{ ml: 1, height: 16, fontSize: 8, bgcolor: '#fee2e2', color: '#ef4444', fontWeight: 900 }} />
+                    )}
                   </div>
                   <div className="flex flex-col gap-1">
                     <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
@@ -200,9 +223,9 @@ const MyLeaves = () => {
                     {item.status.toUpperCase()}
                   </span>
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button className="btn-icon-ems"><Eye size={16}/></button>
-                    {item.status === 'pending' && <button className="btn-icon-ems text-indigo-600"><Edit3 size={16}/></button>}
-                    <button className="btn-icon-ems text-red-500"><XCircle size={16}/></button>
+                    <button className="btn-icon-ems"><Eye size={16} /></button>
+                    {item.status === 'pending' && <button className="btn-icon-ems text-indigo-600"><Edit3 size={16} /></button>}
+                    <button className="btn-icon-ems text-red-500"><XCircle size={16} /></button>
                   </div>
                 </div>
               </div>
@@ -229,51 +252,79 @@ const MyLeaves = () => {
           <div className="flex flex-col gap-4 pt-2">
             <div>
               <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Leave Type</label>
-              <select 
-                className="form-select-ems" 
-                name="type" 
-                value={formData.type} 
+              <select
+                className="form-select-ems"
+                name="type"
+                value={formData.type}
                 onChange={handleInputChange}
               >
-                <option value="Annual">Annual Leave</option>
-                <option value="Sick">Sick Leave</option>
-                <option value="Unpaid">Unpaid Leave</option>
+                {Object.entries(leaveTypeConfig).map(([key, config]) => (
+                  <option key={key} value={key}>{config.label}</option>
+                ))}
               </select>
             </div>
+            {isProbation && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-3">
+                <AlertCircle size={18} className="text-amber-600" />
+                <p className="text-[11px] font-bold text-amber-800 leading-tight">
+                  PROBATION RULE: During your first 3 months, leaves require manager approval and excess leave may result in salary deduction.
+                </p>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Start Date</label>
-                <input 
-                  type="date" 
-                  className="form-input-ems" 
-                  name="start" 
-                  value={formData.start} 
-                  onChange={handleInputChange} 
+                <input
+                  type="date"
+                  className="form-input-ems"
+                  name="start"
+                  value={formData.start}
+                  onChange={handleInputChange}
                 />
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">End Date</label>
-                <input 
-                  type="date" 
-                  className="form-input-ems" 
-                  name="end" 
-                  value={formData.end} 
-                  onChange={handleInputChange} 
+                <input
+                  type="date"
+                  className="form-input-ems"
+                  name="end"
+                  value={formData.end}
+                  onChange={handleInputChange}
                 />
               </div>
             </div>
-            <div className="bg-indigo-50 p-3 rounded-xl flex items-center gap-3 border border-indigo-100">
-              <Info size={16} className="text-indigo-600" />
-              <span className="text-xs font-bold text-indigo-700">Total Duration: <strong>{calculateDays()} Days</strong></span>
+            <div className={`p-3 rounded-xl flex items-center justify-between border ${durationPreview.isSandwich ? 'bg-red-50 border-red-100' : 'bg-indigo-50 border-indigo-100'}`}>
+              <div className="flex items-center gap-3">
+                <Info size={16} className={durationPreview.isSandwich ? 'text-red-600' : 'text-indigo-600'} />
+                <span className={`text-xs font-bold ${durationPreview.isSandwich ? 'text-red-700' : 'text-indigo-700'}`}>
+                  Total Duration: <strong>{durationPreview.totalDays} Days</strong>
+                </span>
+              </div>
+              {durationPreview.isSandwich && (
+                <span className="text-[9px] font-black bg-red-600 text-white px-2 py-0.5 rounded-full uppercase">Sandwich Rule Applied</span>
+              )}
             </div>
+
+            {formData.type === 'sick_leave' && durationPreview.totalDays >= 2 && (
+              <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl">
+                <label className="text-xs font-bold text-blue-700 uppercase tracking-widest block mb-2">Medical Certificate (Mandatory)</label>
+                <input
+                  type="file"
+                  className="text-xs text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-black file:bg-blue-600 file:text-white hover:file:bg-blue-700"
+                  onChange={(e) => setFormData(prev => ({ ...prev, medicalFile: e.target.files[0] }))}
+                  accept=".pdf,.jpg,.png,.docx"
+                />
+                <p className="text-[10px] text-blue-500 mt-2">Required for sick leave of 2 or more days.</p>
+              </div>
+            )}
             <div>
               <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Reason for Leave</label>
-              <textarea 
-                className="form-input-ems" 
-                rows="3" 
-                name="reason" 
-                value={formData.reason} 
-                onChange={handleInputChange} 
+              <textarea
+                className="form-input-ems"
+                rows="3"
+                name="reason"
+                value={formData.reason}
+                onChange={handleInputChange}
                 placeholder="Provide a clear reason..."
               ></textarea>
             </div>

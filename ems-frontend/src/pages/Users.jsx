@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Box, Avatar, Dialog, DialogTitle, DialogContent, DialogActions, IconButton } from '@mui/material';
 import { Shield, Plus, Edit, Trash2, X, Search, User as UserIcon, Mail, Lock, Building, Eye } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-hot-toast';
 import Swal from 'sweetalert2';
 import PageHeader from '../components/PageHeader';
 import RoleBadge from '../components/RoleBadge';
@@ -54,11 +55,11 @@ const UsersPage = () => {
 
   const handleDelete = (user) => {
     if (user.id === currentUser.id) {
-      Swal.fire({ title: 'Invalid Action', text: 'You cannot delete your own account.', icon: 'error' });
+      toast.error('You cannot delete your own account.');
       return;
     }
     if (user.role === 'super_admin') {
-      Swal.fire({ title: 'Restricted', text: 'Super Admin accounts must be managed via Supabase directly for security.', icon: 'warning' });
+      toast.error('Super Admin accounts must be managed via Supabase directly.');
       return;
     }
     Swal.fire({
@@ -75,11 +76,11 @@ const UsersPage = () => {
           const { error } = await supabase.rpc('admin_delete_user', { target_user_id: user.id });
           if (error) throw error;
           
-          Swal.fire('Deleted!', 'User has been removed from the system.', 'success');
+          toast.success('User has been removed.');
           fetchData();
         } catch (err) {
           console.error(err);
-          Swal.fire('Error', err.message, 'error');
+          toast.error('Deletion failed: ' + err.message);
         } finally {
           setLoading(false);
         }
@@ -89,7 +90,7 @@ const UsersPage = () => {
 
   const handleCreateUser = async () => {
     if (!formData.fullName || !formData.email || !formData.password) {
-      Swal.fire({ title: 'Error', text: 'All fields are required.', icon: 'error' });
+      toast.error('All fields are required.');
       return;
     }
 
@@ -111,11 +112,11 @@ const UsersPage = () => {
 
       setShowDialog(false);
       setFormData({ fullName: '', email: '', password: '', role: 'employee', departmentId: '', empIdSuffix: '' });
-      Swal.fire({ title: 'User Created!', text: 'The new user can now log in.', icon: 'success' });
+      toast.success('User Created Successfully!');
       fetchData();
     } catch (err) {
       console.error(err);
-      Swal.fire({ title: 'Creation Failed', text: err.message, icon: 'error' });
+      toast.error('Creation Failed: ' + err.message);
     } finally {
       setLoading(false);
     }

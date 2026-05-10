@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Avatar, Dialog, DialogTitle, DialogContent, DialogActions, IconButton, Skeleton } from '@mui/material';
 import { Calendar, Check, X, Clock, CalendarOff, Plus } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 import Swal from 'sweetalert2';
 import PageHeader from '../components/PageHeader';
 import { leaveService } from '../services/leaveService';
@@ -15,7 +16,14 @@ const LeaveManagement = () => {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [leaveForm, setLeaveForm] = useState({ type: 'Sick Leave', start: '', end: '', reason: '' });
+  const [leaveForm, setLeaveForm] = useState({ type: 'casual_leave', start: '', end: '', reason: '' });
+
+  const leaveTypeConfig = {
+    'casual_leave': { label: 'Casual Leave (CL)', color: '#4f46e5', bg: '#f5f3ff' },
+    'sick_leave': { label: 'Medical/Sick Leave (ML/SL)', color: '#ef4444', bg: '#fef2f2' },
+    'optional_leave': { label: 'Optional Leave', color: '#f59e0b', bg: '#fffbeb' },
+    'lwp': { label: 'Leave Without Pay (LWP)', color: '#64748b', bg: '#f1f5f9' }
+  };
 
   const fetchAllRequests = async () => {
     try {
@@ -46,10 +54,10 @@ const LeaveManagement = () => {
     try {
       setLoading(true);
       await leaveService.updateStatus(requestId, status, user.id, profile.role);
-      const msg = status === 'approved' ? 'Step Approved' : 'Rejected';
       fetchAllRequests();
+      toast.success(status === 'approved' ? 'Leave Approved' : 'Leave Rejected');
     } catch (err) {
-      Swal.fire('Error', err.message, 'error');
+      toast.error('Action failed: ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -58,7 +66,7 @@ const LeaveManagement = () => {
   const handleApply = async (e) => {
     e.preventDefault();
     if (!leaveForm.start || !leaveForm.end || !leaveForm.reason) {
-      Swal.fire('Wait', 'Please fill all fields', 'warning');
+      toast.error('Please fill all fields');
       return;
     }
 
@@ -70,12 +78,12 @@ const LeaveManagement = () => {
         end_date: leaveForm.end,
         reason: leaveForm.reason
       });
-      Swal.fire('Success', 'Leave request submitted!', 'success');
+      toast.success('Leave request submitted!');
       setShowApplyDialog(false);
       setLeaveForm({ type: 'Sick Leave', start: '', end: '', reason: '' });
       fetchAllRequests();
     } catch (err) {
-      Swal.fire('Error', err.message, 'error');
+      toast.error('Error: ' + err.message);
     } finally {
       setSubmitting(false);
     }
@@ -133,25 +141,37 @@ const LeaveManagement = () => {
           const name = leave.profiles?.full_name || leave.profiles?.email || 'User';
 
           return (
-            <Box key={leave.id} className="card-ems" sx={{ p: 3, borderLeft: leave.status === 'pending' ? '4px solid #f59e0b' : 'none' }}>
+            <Box key={leave.id} className="card-ems" sx={{ p: 3, borderLeft: leave.status.startsWith('pending') ? '4px solid #f59e0b' : 'none' }}>
               <div className="flex justify-between items-start mb-3">
                 <div className="flex items-center gap-3">
                   <Avatar sx={{ width: 44, height: 44, bgcolor: '#eef2ff', color: '#4f46e5', fontWeight: 700 }}>{name.charAt(0)}</Avatar>
                   <div>
                     <p className="text-base font-bold text-slate-900">{name}</p>
-                    <p className="text-xs text-slate-500">{leave.leave_type}</p>
+                    <p className="text-xs font-bold text-indigo-600">{leaveTypeConfig[leave.leave_type]?.label || leave.leave_type}</p>
                   </div>
                 </div>
                 <span className={`badge-pill ${leave.status.startsWith('pending') ? 'warning' : leave.status === 'approved' ? 'success' : 'danger'}`}>
                   {leave.status.replace(/_/g, ' ').toUpperCase()}
                 </span>
               </div>
+              
               <div className="p-3 rounded-xl mb-3 bg-slate-50 border border-slate-100">
-                <div className="flex items-center gap-2 text-indigo-600 font-bold text-sm mb-1">
-                  <Calendar size={14} /> {start.toLocaleDateString()} - {end.toLocaleDateString()}
-                  <span className="text-xs text-slate-400 font-medium ml-1">({days} days)</span>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2 text-slate-700 font-bold text-sm">
+                    <Calendar size={14} className="text-slate-400" /> {start.toLocaleDateString()} - {end.toLocaleDateString()}
+                    <span className="text-xs text-indigo-600 font-black ml-1">({leave.total_days || days} days)</span>
+                  </div>
+                  {leave.is_sandwich_applied && (
+                    <span className="text-[9px] font-black bg-red-100 text-red-600 px-2 py-0.5 rounded-full uppercase">Sandwich Rule</span>
+                  )}
                 </div>
-                <p className="text-sm text-slate-600 leading-relaxed">{leave.reason}</p>
+                <p className="text-sm text-slate-600 leading-relaxed mb-3">{leave.reason}</p>
+                
+                {leave.medical_doc_url && (
+                  <a href={leave.medical_doc_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-[10px] font-black text-blue-600 uppercase hover:underline bg-blue-50 px-2 py-1 rounded-lg">
+                    <Check size={12} /> View Medical Certificate
+                  </a>
+                )}
               </div>
 
               {/* Approval Info */}
@@ -229,7 +249,9 @@ const LeaveManagement = () => {
             <div>
               <label className="text-sm font-semibold text-slate-700 block mb-1.5">Leave Type</label>
               <select className="form-select-ems" value={leaveForm.type} onChange={(e) => setLeaveForm({...leaveForm, type: e.target.value})}>
-                <option>Sick Leave</option><option>Personal Leave</option><option>Vacation</option><option>Emergency</option>
+                {Object.entries(leaveTypeConfig).map(([key, config]) => (
+                  <option key={key} value={key}>{config.label}</option>
+                ))}
               </select>
             </div>
             <div className="grid grid-cols-2 gap-3">

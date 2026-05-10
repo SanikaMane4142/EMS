@@ -26,8 +26,6 @@ export const reportService = {
         report_date: today,
         tasks_planned: reportData.tasks_planned,
         tasks_completed: reportData.tasks_completed,
-        auto_filled_planned_tasks: reportData.auto_filled_planned_tasks || [],
-        auto_filled_completed_tasks: reportData.auto_filled_completed_tasks || [],
         work_in_progress: reportData.work_in_progress,
         tomorrow_plan: reportData.tomorrow_plan,
         total_working_hours: reportData.total_working_hours,

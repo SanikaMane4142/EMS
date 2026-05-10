@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Box, Avatar, Dialog, DialogTitle, DialogContent, DialogActions, IconButton, Chip } from '@mui/material';
 import { Search, Plus, X, Edit, Trash2, Eye } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-hot-toast';
 import Swal from 'sweetalert2';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
@@ -37,9 +38,9 @@ const Employees = () => {
       if (result.isConfirmed) {
         try {
           await deleteEmployee.mutateAsync(emp.id);
-          Swal.fire('Deleted!', 'Employee has been removed.', 'success');
+          toast.success('Employee has been removed.');
         } catch (err) {
-          Swal.fire('Error', err.message, 'error');
+          toast.error('Error: ' + err.message);
         }
       }
     });

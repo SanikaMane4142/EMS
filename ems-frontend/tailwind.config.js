@@ -4,7 +4,6 @@ export default {
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
-  important: '#root',
   theme: {
     extend: {
       colors: {
@@ -50,6 +49,9 @@ export default {
         'fade-in': 'fadeIn 0.3s ease-out',
         'slide-up': 'slideUp 0.3s ease-out',
         'pulse-dot': 'pulseDot 2s infinite',
+        'zoom-in': 'zoomIn 0.2s ease-out',
+        'slide-in-from-top': 'slideInFromTop 0.5s ease-out',
+        'slide-in-from-left': 'slideInFromLeft 0.5s ease-out',
       },
       keyframes: {
         fadeIn: {
@@ -59,6 +61,18 @@ export default {
         slideUp: {
           '0%': { opacity: '0', transform: 'translateY(10px)' },
           '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        zoomIn: {
+          '0%': { opacity: '0', transform: 'scale(0.95)' },
+          '100%': { opacity: '1', transform: 'scale(1)' },
+        },
+        slideInFromTop: {
+          '0%': { opacity: '0', transform: 'translateY(-20px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        slideInFromLeft: {
+          '0%': { opacity: '0', transform: 'translateX(-20px)' },
+          '100%': { opacity: '1', transform: 'translateX(0)' },
         },
         pulseDot: {
           '0%': { boxShadow: '0 0 0 0 rgba(16, 185, 129, 0.4)' },
