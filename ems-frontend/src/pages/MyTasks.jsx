@@ -29,7 +29,8 @@ import {
   useMyTasks, useCreateTask, useToggleSubtask, useToggleGroup,
   useSubmitForReview, useMarkAsDone, useAddGroup, useAddSubtask,
   useUpdateTaskOrder, useUpdateGroupOrder, useUpdateSubtaskOrder,
-  useUpdateTask, useTaskComments, useAddComment, useToggleCommentResolution
+  useUpdateTask, useTaskComments, useAddComment, useToggleCommentResolution,
+  useMarkChangesDone
 } from '../hooks/useTasks';
 import { taskService } from '../services/taskService';
 import { notificationService } from '../services/notificationService';
@@ -300,6 +301,9 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
   const updateGroupOrder = useUpdateGroupOrder();
   const updateSubtaskOrder = useUpdateSubtaskOrder();
   const updateTaskMutation = useUpdateTask();
+  const markChangesDoneMutation = useMarkChangesDone();
+  const submitForReviewMutation = useSubmitForReview();
+  const markAsDoneMutation = useMarkAsDone();
 
   const [statusAnchor, setStatusAnchor] = useState(null);
   const [reviewModal, setReviewModal] = useState({ open: false, type: 'approve' }); // type: 'approve' | 'request_changes'
@@ -314,7 +318,13 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
   const isAssigner = activeTask.assigned_by === currentUserId;
   const canEdit = isAssignee || (isAssigner && !activeTask.is_acknowledged);
   const allDone = taskService.allSubtasksDone(taskGroups);
-  const canSubmitReview = isAssignee && allDone && activeTask.status === 'in_progress';
+  
+  // Workflow Logic: Check if there are any unresolved "Changes Requested" comments
+  const unresolvedChanges = comments.some(c => 
+    c.message.includes('Changes Requested') && !c.is_resolved
+  );
+
+  const canSubmitReview = isAssignee && allDone && activeTask.status === 'in_progress' && !unresolvedChanges;
   const canMarkDone = isAssigner && activeTask.status === 'review';
   const canRequestChanges = isAssigner && activeTask.status === 'review';
 
@@ -538,14 +548,26 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
 
     try {
       // 1. Primary Action: Update status
-      // We use mutateAsync to ensure the primary DB update is successful before proceeding
-      await updateTaskMutation.mutateAsync({
-        taskId: activeTask.id,
-        updates: { status: newStatus, progress: isApprove ? 100 : 50 },
-        actorId: currentUserId,
-        actionType: 'status_changed',
-        oldValue: { status: activeTask.status }
-      });
+      if (isApprove) {
+        await markAsDoneMutation.mutateAsync({
+          taskId: activeTask.id,
+          actorId: currentUserId,
+          oldStatus: activeTask.status
+        });
+      } else {
+        await updateTaskMutation.mutateAsync({
+          taskId: activeTask.id,
+          updates: { 
+            status: newStatus, 
+            progress: 50,
+            needs_changes: true,
+            changes_completed: false
+          },
+          actorId: currentUserId,
+          actionType: 'status_changed',
+          oldValue: { status: activeTask.status }
+        });
+      }
 
       // 2. Secondary Actions (Don't let these block the UI if they fail)
       try {
@@ -692,6 +714,16 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
                 <div className="flex items-center gap-3">
                   <h1 className="text-xl font-bold text-slate-900 tracking-tight leading-none truncate">{activeTask.title}</h1>
                   <PriorityBadge priority={activeTask.priority} />
+                  {unresolvedChanges && (
+                    <span className="text-[9px] font-black px-2.5 py-1 bg-red-50 text-red-500 border border-red-100 rounded-lg uppercase tracking-widest animate-pulse">
+                      Changes Requested
+                    </span>
+                  )}
+                  {activeTask.needs_changes && !unresolvedChanges && (
+                    <span className="text-[9px] font-black px-2.5 py-1 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-lg uppercase tracking-widest">
+                      Changes Resolved
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -789,17 +821,15 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
                   <div className="flex items-center gap-2">
                     {canSubmitReview && (
                       <button
-                        onClick={() => updateTaskMutation.mutate({
+                        onClick={() => submitForReviewMutation.mutate({
                           taskId: activeTask.id,
-                          updates: { status: 'review' },
                           actorId: currentUserId,
-                          actionType: 'status_changed',
-                          oldValue: { status: activeTask.status }
+                          oldStatus: activeTask.status
                         })}
-                        disabled={updateTaskMutation.isPending}
+                        disabled={submitForReviewMutation.isPending}
                         className="h-8 px-4 rounded-xl bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest shadow-lg shadow-indigo-200 hover:bg-indigo-700 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2 group"
                       >
-                        {updateTaskMutation.isPending ? (
+                        {submitForReviewMutation.isPending ? (
                           <CircularProgress size={12} color="inherit" />
                         ) : (
                           <>
@@ -1083,7 +1113,7 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
             {/* Footer Actions */}
             <div className="px-8 pb-8 flex gap-4">
               <button
-                disabled={updateTaskMutation.isPending || addCommentMutation.isPending}
+                disabled={updateTaskMutation.isPending || markAsDoneMutation.isPending || addCommentMutation.isPending}
                 onClick={() => setReviewModal({ open: false, type: 'approve' })}
                 className="flex-1 h-12 rounded-2xl border border-slate-100 text-[11px] font-black uppercase tracking-widest text-[#6B7280] hover:text-[#111827] hover:bg-slate-50 transition-all active:scale-95 disabled:opacity-50"
               >
@@ -1094,6 +1124,7 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
                 disabled={
                   (reviewModal.type === 'request_changes' && !reviewNote.trim()) ||
                   updateTaskMutation.isPending ||
+                  markAsDoneMutation.isPending ||
                   addCommentMutation.isPending
                 }
                 className={`flex-[1.8] h-12 rounded-2xl flex items-center justify-center gap-3 text-[11px] font-black uppercase tracking-widest text-white shadow-xl transition-all active:scale-95 disabled:opacity-50 disabled:grayscale group ${reviewModal.type === 'approve'
@@ -1101,7 +1132,7 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
                     : 'bg-gradient-to-r from-[#FF8A00] to-[#FF3D3D] shadow-orange-200'
                   }`}
               >
-                {(updateTaskMutation.isPending || addCommentMutation.isPending) ? (
+                {(updateTaskMutation.isPending || markAsDoneMutation.isPending || addCommentMutation.isPending) ? (
                   <>
                     <CircularProgress size={16} color="inherit" /> Processing...
                   </>

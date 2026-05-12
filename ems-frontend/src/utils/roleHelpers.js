@@ -107,6 +107,12 @@ export const getNavLinks = (dbRole) => {
       label: 'Org Tasks',
       roles: ['super_admin', 'hr'],
     },
+    {
+      to: '/departments',
+      icon: Building,
+      label: 'Departments',
+      roles: ['super_admin', 'hr'],
+    },
 
     {
       to: '/users',

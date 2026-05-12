@@ -1,0 +1,6 @@
+- [x] Implement `communicationService.js` for announcements
+- [x] Update `employeeService.js` for Celebration queries
+- [x] Build `CelebrationCard` component
+- [x] Build `NoticeBoard` component
+- [x] Integrate components into `EmployeeDashboard`
+- [x] Add "Post Announcement" to `AdminDashboard`

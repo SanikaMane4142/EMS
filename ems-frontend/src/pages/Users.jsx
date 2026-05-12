@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Box, Avatar, Dialog, DialogTitle, DialogContent, DialogActions, IconButton } from '@mui/material';
-import { Shield, Plus, Edit, Trash2, X, Search, User as UserIcon, Mail, Lock, Building, Eye } from 'lucide-react';
+import { Shield, Plus, Edit, Trash2, X, Search, User as UserIcon, Mail, Lock, Building, Eye, EyeOff } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import Swal from 'sweetalert2';
@@ -8,6 +8,7 @@ import PageHeader from '../components/PageHeader';
 import RoleBadge from '../components/RoleBadge';
 import { profileService } from '../services/profileService';
 import { departmentService } from '../services/departmentService';
+import { employeeService } from '../services/employeeService';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabaseClient';
 
@@ -27,6 +28,8 @@ const UsersPage = () => {
     departmentId: '',
     empIdSuffix: ''
   });
+  const [showPassword, setShowPassword] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -35,7 +38,7 @@ const UsersPage = () => {
         profileService.getAllEmployees(),
         departmentService.getAll()
       ]);
-      setUsers(userList);
+      setUsers(userList || []);
       setDepts(deptList);
     } catch (err) {
       console.error(err);
@@ -48,10 +51,12 @@ const UsersPage = () => {
     fetchData();
   }, []);
 
-  const filtered = users.filter(u =>
-    (u.full_name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
-    (u.email || '').toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filtered = users.filter(u => {
+    const matchesStatus = showInactive || u.status === 'active';
+    const matchesSearch = (u.full_name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+                         (u.email || '').toLowerCase().includes(searchTerm.toLowerCase());
+    return matchesStatus && matchesSearch;
+  });
 
   const handleDelete = (user) => {
     if (user.id === currentUser.id) {
@@ -73,10 +78,13 @@ const UsersPage = () => {
       if (result.isConfirmed) {
         try {
           setLoading(true);
-          const { error } = await supabase.rpc('admin_delete_user', { target_user_id: user.id });
-          if (error) throw error;
+          // Use employeeService which handles the soft-delete status update
+          await employeeService.delete(user.id);
           
-          toast.success('User has been removed.');
+          // Optimistic UI update: remove from local state immediately
+          setUsers(prev => prev.filter(u => u.id !== user.id));
+          
+          toast.success('User has been removed (Soft Delete).');
           fetchData();
         } catch (err) {
           console.error(err);
@@ -146,10 +154,24 @@ const UsersPage = () => {
 
       {/* Search */}
       <Box className="card-ems-static" sx={{ p: 2, mb: 3 }}>
-        <div className="relative">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input type="text" className="form-input-ems pl-10" placeholder="Search users by name or email..."
-            value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+        <div className="flex flex-col md:flex-row gap-4 items-center">
+          <div className="relative flex-1">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input type="text" className="form-input-ems pl-10" placeholder="Search users by name or email..."
+              value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+          </div>
+          <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 rounded-lg border border-slate-200">
+            <input 
+              type="checkbox" 
+              id="show-inactive"
+              className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
+              checked={showInactive}
+              onChange={(e) => setShowInactive(e.target.checked)}
+            />
+            <label htmlFor="show-inactive" className="text-xs font-bold text-slate-600 cursor-pointer uppercase tracking-wider">
+              Show Deleted/Inactive
+            </label>
+          </div>
         </div>
       </Box>
 
@@ -245,8 +267,20 @@ const UsersPage = () => {
               <label className="text-sm font-semibold text-slate-700 block mb-1.5">Password</label>
               <div className="relative">
                 <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input type="password" className="form-input-ems pl-10" placeholder="Set initial password" 
-                  value={formData.password} onChange={(e) => setFormData({...formData, password: e.target.value})} />
+                <input 
+                  type={showPassword ? "text" : "password"} 
+                  className="form-input-ems pl-10 pr-10" 
+                  placeholder="Set initial password" 
+                  value={formData.password} 
+                  onChange={(e) => setFormData({...formData, password: e.target.value})} 
+                />
+                <button
+                  type="button"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                  onClick={() => setShowPassword(!showPassword)}
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
               </div>
             </div>
             <div>

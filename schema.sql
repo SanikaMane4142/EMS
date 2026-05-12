@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     birthday      DATE,
     employee_id   TEXT        UNIQUE,
     joined_at     DATE        DEFAULT CURRENT_DATE,
+    joining_date  DATE        DEFAULT CURRENT_DATE,
+    is_on_probation BOOLEAN     DEFAULT TRUE,
     created_at    TIMESTAMPTZ DEFAULT NOW(),
     updated_at    TIMESTAMPTZ DEFAULT NOW()
 );
@@ -86,6 +88,9 @@ CREATE TABLE IF NOT EXISTS public.attendance (
     lunch_end_time      TIMESTAMPTZ,
     lunch_duration_ms   BIGINT      DEFAULT 0,
     lunch_delay_reason  TEXT,
+    overtime_start_time TIMESTAMPTZ,
+    overtime_end_time   TIMESTAMPTZ,
+    overtime_duration_ms BIGINT      DEFAULT 0,
     created_at          TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT unique_user_day UNIQUE (user_id, attendance_date)
 );
@@ -109,6 +114,11 @@ CREATE TABLE IF NOT EXISTS public.leave_requests (
     hr_action_at          TIMESTAMPTZ,
     super_admin_id        UUID        REFERENCES public.profiles(id),
     super_admin_action_at TIMESTAMPTZ,
+    -- Policy enhancements
+    total_days            INTEGER,
+    is_lwp                BOOLEAN     DEFAULT FALSE,
+    medical_doc_url       TEXT,
+    is_sandwich_applied   BOOLEAN     DEFAULT FALSE,
     created_at            TIMESTAMPTZ DEFAULT NOW(),
     updated_at            TIMESTAMPTZ DEFAULT NOW()
 );
@@ -152,6 +162,58 @@ CREATE TABLE IF NOT EXISTS public.notifications (
     is_read    BOOLEAN     DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+ 
+ 
+-- -----------------------------------------------------------------------------
+-- 1.7  LEAVE MANAGEMENT MODULE
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.company_holidays (
+    id          UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    holiday_date DATE       NOT NULL UNIQUE,
+    name        TEXT        NOT NULL,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.leave_balances (
+    id          UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id     UUID        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    year        INTEGER     NOT NULL DEFAULT EXTRACT(YEAR FROM NOW()),
+    cl_total    INTEGER     NOT NULL DEFAULT 20,
+    cl_used     INTEGER     NOT NULL DEFAULT 0,
+    sl_total    INTEGER     NOT NULL DEFAULT 6,
+    sl_used     INTEGER     NOT NULL DEFAULT 0,
+    ol_total    INTEGER     NOT NULL DEFAULT 2,
+    ol_used     INTEGER     NOT NULL DEFAULT 0,
+    cl_carried  INTEGER     NOT NULL DEFAULT 0,
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user_id, year)
+);
+
+CREATE TABLE IF NOT EXISTS public.leave_encashments (
+    id             UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id        UUID        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    encashment_year INTEGER    NOT NULL,
+    days_encashed  INTEGER     NOT NULL,
+    processed_at   TIMESTAMPTZ DEFAULT NOW(),
+    processed_by   UUID        REFERENCES public.profiles(id),
+    status         TEXT        DEFAULT 'pending' CHECK (status IN ('pending', 'processed'))
+);
+
+
+-- -----------------------------------------------------------------------------
+-- 1.8  ANNOUNCEMENTS & COMMUNICATIONS
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.announcements (
+    id          UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    title       TEXT        NOT NULL,
+    content     TEXT        NOT NULL,
+    priority    TEXT        DEFAULT 'info' 
+                            CHECK (priority IN ('info', 'important', 'urgent', 'emergency')),
+    created_by  UUID        NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    is_active   BOOLEAN     DEFAULT TRUE,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
 
 
 -- =============================================================================
@@ -170,6 +232,9 @@ BEGIN
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'notifications') THEN
         ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'announcements') THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.announcements;
     END IF;
 END $$;
 
@@ -201,6 +266,18 @@ CREATE TRIGGER trg_leave_requests_updated_at
 DROP TRIGGER IF EXISTS trg_daily_reports_updated_at ON public.daily_reports;
 CREATE TRIGGER trg_daily_reports_updated_at
     BEFORE UPDATE ON public.daily_reports
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+-- task_groups
+DROP TRIGGER IF EXISTS trg_task_groups_updated_at ON public.task_groups;
+CREATE TRIGGER trg_task_groups_updated_at
+    BEFORE UPDATE ON public.task_groups
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+-- subtasks
+DROP TRIGGER IF EXISTS trg_subtasks_updated_at ON public.subtasks;
+CREATE TRIGGER trg_subtasks_updated_at
+    BEFORE UPDATE ON public.subtasks
     FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 
@@ -352,6 +429,9 @@ ALTER TABLE public.attendance     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.leave_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.daily_reports  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notifications  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.leave_balances ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.company_holidays ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.leave_encashments ENABLE ROW LEVEL SECURITY;
 
 
 -- -----------------------------------------------------------------------------
@@ -361,7 +441,7 @@ DROP POLICY IF EXISTS "dept_view_all"     ON public.departments;
 CREATE POLICY "dept_view_all"     ON public.departments FOR SELECT     TO authenticated USING (true);
 
 DROP POLICY IF EXISTS "dept_manage_admin" ON public.departments;
-CREATE POLICY "dept_manage_admin" ON public.departments FOR ALL        TO authenticated USING (get_my_role() IN ('admin', 'super_admin'));
+CREATE POLICY "dept_manage_admin" ON public.departments FOR ALL        TO authenticated USING (get_my_role() IN ('hr', 'admin', 'super_admin'));
 
 
 -- -----------------------------------------------------------------------------
@@ -382,6 +462,7 @@ DROP POLICY IF EXISTS "Users can view own profile"  ON public.profiles;
 DROP POLICY IF EXISTS "profiles_self_read"          ON public.profiles;
 
 -- Canonical policies
+CREATE POLICY "profiles_read_active" ON public.profiles FOR SELECT TO authenticated USING (status = 'active');
 CREATE POLICY "profiles_self_view"       ON public.profiles FOR SELECT TO authenticated USING (auth.uid() = id);
 CREATE POLICY "profiles_management_view" ON public.profiles FOR SELECT TO authenticated USING (get_my_role() IN ('hr', 'admin', 'super_admin'));
 CREATE POLICY "profiles_self_update"     ON public.profiles FOR UPDATE TO authenticated USING (auth.uid() = id);
@@ -438,6 +519,35 @@ CREATE POLICY "notifications_self_update"  ON public.notifications FOR UPDATE TO
 CREATE POLICY "notifications_any_insert"   ON public.notifications FOR INSERT TO authenticated WITH CHECK (true);
 
 
+-- -----------------------------------------------------------------------------
+-- 5.7  LEAVE MANAGEMENT MODULE
+-- -----------------------------------------------------------------------------
+-- Balances
+CREATE POLICY "balances_view_own" ON public.leave_balances FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "balances_admin_all" ON public.leave_balances FOR ALL USING (get_my_role() IN ('hr', 'admin', 'super_admin'));
+
+-- Holidays
+CREATE POLICY "holidays_view_all" ON public.company_holidays FOR SELECT TO authenticated USING (true);
+CREATE POLICY "holidays_admin_all" ON public.company_holidays FOR ALL USING (get_my_role() IN ('hr', 'admin', 'super_admin'));
+
+-- Encashments
+CREATE POLICY "encash_view_own" ON public.leave_encashments FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "encash_admin_all" ON public.leave_encashments FOR ALL USING (get_my_role() IN ('hr', 'admin', 'super_admin'));
+
+-- -----------------------------------------------------------------------------
+-- 5.8  ANNOUNCEMENTS
+-- -----------------------------------------------------------------------------
+ALTER TABLE public.announcements ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "announcements_view_active" ON public.announcements;
+CREATE POLICY "announcements_view_active" ON public.announcements FOR SELECT TO authenticated 
+    USING (is_active = true);
+
+DROP POLICY IF EXISTS "announcements_admin_all" ON public.announcements;
+CREATE POLICY "announcements_admin_all" ON public.announcements FOR ALL TO authenticated 
+    USING (get_my_role() IN ('hr', 'admin', 'super_admin'));
+
+
 -- =============================================================================
 -- SECTION 6: TASK MANAGEMENT MODULE
 -- =============================================================================
@@ -462,6 +572,8 @@ CREATE TABLE IF NOT EXISTS public.tasks (
     deadline        DATE,
     is_acknowledged BOOLEAN     DEFAULT FALSE,
     acknowledged_at TIMESTAMPTZ,
+    needs_changes   BOOLEAN     DEFAULT FALSE,
+    changes_completed BOOLEAN   DEFAULT FALSE,
     sort_order      INTEGER     DEFAULT 0,
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     updated_at      TIMESTAMPTZ DEFAULT NOW()
@@ -475,7 +587,8 @@ CREATE TABLE IF NOT EXISTS public.task_groups (
     task_id    UUID    NOT NULL REFERENCES public.tasks(id) ON DELETE CASCADE,
     title      TEXT    NOT NULL,
     is_completed BOOLEAN DEFAULT FALSE,
-    sort_order INTEGER DEFAULT 0
+    sort_order INTEGER DEFAULT 0,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- -----------------------------------------------------------------------------
@@ -487,7 +600,8 @@ CREATE TABLE IF NOT EXISTS public.subtasks (
     title        TEXT    NOT NULL,
     is_completed BOOLEAN DEFAULT FALSE,
     due_date     DATE,
-    sort_order   INTEGER DEFAULT 0
+    sort_order   INTEGER DEFAULT 0,
+    updated_at   TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- -----------------------------------------------------------------------------
@@ -597,7 +711,49 @@ CREATE POLICY "comments_task_access" ON public.task_comments FOR ALL TO authenti
 
 
 -- =============================================================================
--- SECTION 7: SCHEMA CACHE REFRESH
+-- SECTION 8: TASK MANAGEMENT WORKSPACE (COMMENTS & AUDIT)
+-- =============================================================================
+
+-- Table for task-level feedback and discussion
+CREATE TABLE IF NOT EXISTS task_comments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  task_id UUID REFERENCES tasks(id) ON DELETE CASCADE,
+  author_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  message TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Table for tracking status changes and history
+CREATE TABLE IF NOT EXISTS task_activity_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  task_id UUID REFERENCES tasks(id) ON DELETE CASCADE,
+  actor_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  action_type TEXT NOT NULL, -- 'status_changed', 'assigned', 'task_created', etc.
+  old_value JSONB,
+  new_value JSONB,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Enable RLS
+ALTER TABLE task_comments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE task_activity_logs ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies for Comments
+CREATE POLICY "Users can view comments for tasks" 
+ON task_comments FOR SELECT USING (true);
+
+CREATE POLICY "Users can insert their own comments" 
+ON task_comments FOR INSERT WITH CHECK (auth.uid() = author_id);
+
+-- RLS Policies for Activity Logs
+CREATE POLICY "Users can view activity logs" 
+ON task_activity_logs FOR SELECT USING (true);
+
+CREATE POLICY "System can insert activity logs" 
+ON task_activity_logs FOR INSERT WITH CHECK (true);
+
+-- =============================================================================
+-- SECTION 9: SCHEMA CACHE REFRESH
 -- =============================================================================
 NOTIFY pgrst, 'reload schema';
 

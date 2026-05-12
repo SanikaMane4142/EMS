@@ -214,10 +214,22 @@ export const taskService = {
   async submitForReview(taskId, actorId, oldStatus) {
     return taskService.updateTask(
       taskId,
-      { status: 'review' },
+      { status: 'review', needs_changes: false, changes_completed: false },
       actorId,
       'status_changed',
       { status: oldStatus }
+    );
+  },
+
+  /**
+   * Assignee marks requested changes as completed.
+   */
+  async markChangesDone(taskId, actorId) {
+    return taskService.updateTask(
+      taskId,
+      { changes_completed: true },
+      actorId,
+      'changes_completed'
     );
   },
 

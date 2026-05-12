@@ -106,6 +106,15 @@ export const useAcknowledgeTask = () => {
   });
 };
 
+/** Mark requested changes as completed */
+export const useMarkChangesDone = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ taskId, actorId }) => taskService.markChangesDone(taskId, actorId),
+    onSuccess: () => invalidateAll(qc),
+  });
+};
+
 /** Toggle a subtask's completed state */
 export const useToggleSubtask = () => {
   const qc = useQueryClient();

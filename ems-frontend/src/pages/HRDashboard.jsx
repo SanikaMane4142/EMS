@@ -5,7 +5,7 @@ import { toast } from 'react-hot-toast';
 import { 
   Users, UserCheck, UserX, Clock, CalendarOff, FileText, 
   Megaphone, Send, X, ChevronRight, Save, Zap, Archive, Trash2, History,
-  CheckSquare, Shield
+  CheckSquare, Shield, Building
 } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import PageHeader from '../components/PageHeader';
@@ -166,6 +166,38 @@ const HRDashboard = () => {
         <StatCard title="Leave Requests" value={loading ? '...' : leaveStats.pending.toString()} icon={CalendarOff} color="#f59e0b" bgColor="#fffbeb" />
         <StatCard title="Live Notices" value={loading ? '...' : activeNoticeCount.toString()} icon={Megaphone} color="#7c3aed" bgColor="#f5f3ff" />
       </div>
+
+      {/* Quick Access Modules */}
+      <Box className="card-ems-static" sx={{ p: 3, mb: 6 }}>
+        <h3 className="text-base font-bold text-slate-900 mb-5">Quick Access</h3>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          {[
+            { label: 'Employees', icon: Users, color: '#4f46e5', bg: '#eef2ff', path: '/employees' },
+            { label: 'Attendance', icon: Clock, color: '#10b981', bg: '#ecfdf5', path: '/attendance' },
+            { label: 'Leaves', icon: CalendarOff, color: '#ef4444', bg: '#fef2f2', path: '/leave' },
+            { label: 'Org Tasks', icon: CheckSquare, color: '#f59e0b', bg: '#fffbeb', path: '/organization-tasks' },
+            { label: 'Departments', icon: Building, color: '#7c3aed', bg: '#f5f3ff', path: '/departments' },
+          ].map((mod, i) => {
+            const Icon = mod.icon;
+            return (
+              <div
+                key={i}
+                onClick={() => navigate(mod.path)}
+                className="flex flex-col items-center gap-3 p-5 rounded-xl cursor-pointer transition-all hover:-translate-y-1 hover:shadow-md border border-transparent"
+                style={{ background: mod.bg }}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter') navigate(mod.path); }}
+              >
+                <div className="p-3 rounded-xl" style={{ background: `${mod.color}20` }}>
+                  <Icon size={22} style={{ color: mod.color }} />
+                </div>
+                <span className="text-sm font-bold" style={{ color: mod.color }}>{mod.label}</span>
+              </div>
+            );
+          })}
+        </div>
+      </Box>
 
       {/* Main Grid */}
       <div className="grid grid-cols-1 gap-6 mb-6">

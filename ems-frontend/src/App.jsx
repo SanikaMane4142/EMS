@@ -107,7 +107,7 @@ function App() {
                 {/* Admin/HR Management Routes */}
                 <Route path="/employees" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><Employees /></ProtectedRoute>} />
                 <Route path="/employee/:id" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><EmployeeProfile /></ProtectedRoute>} />
-{/* <Route path="/departments" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><Departments /></ProtectedRoute>} /> */}
+                <Route path="/departments" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><Departments /></ProtectedRoute>} />
                 <Route path="/attendance" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><Attendance /></ProtectedRoute>} />
                 <Route path="/payroll" element={<ProtectedRoute allowedRoles={['super_admin']}><Payroll /></ProtectedRoute>} />
                 <Route path="/leave" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><LeaveManagement /></ProtectedRoute>} />

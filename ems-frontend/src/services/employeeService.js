@@ -11,6 +11,7 @@ export const employeeService = {
         *,
         departments!profiles_department_id_fkey (name)
       `)
+      .eq('status', 'active')
       .order('full_name');
 
     if (error) throw error;
@@ -21,12 +22,24 @@ export const employeeService = {
    * Delete an employee profile
    */
   async delete(id) {
-    const { error } = await supabase
-      .from('profiles')
-      .delete()
-      .eq('id', id);
+    // We use a secure RPC call to bypass RLS restrictions for super admins
+    // This requires the admin_soft_delete_user function to be created in Supabase
+    const { data, error } = await supabase.rpc('admin_soft_delete_user', { 
+      target_user_id: id 
+    });
 
-    if (error) throw error;
+    if (error) {
+      console.error('RPC Delete Error:', error);
+      // Fallback: try direct update if RPC is missing, but catch the error
+      const { error: directError, count } = await supabase
+        .from('profiles')
+        .update({ status: 'inactive' }, { count: 'exact' })
+        .eq('id', id);
+        
+      if (directError || count === 0) {
+        throw new Error('Delete failed: Please ensure you have run the SQL migration in Supabase and have Super Admin rights.');
+      }
+    }
     return true;
   },
 

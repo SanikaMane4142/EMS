@@ -201,6 +201,7 @@ const AdminDashboard = () => {
                 { label: 'Leaves', icon: CalendarOff, color: '#ef4444', bg: '#fef2f2', path: '/leave' },
                 { label: 'Reports', icon: Activity, color: '#3b82f6', bg: '#eff6ff', path: '/reports' },
                 { label: 'Org Tasks', icon: CheckSquare, color: '#f59e0b', bg: '#fffbeb', path: '/organization-tasks' },
+                { label: 'Departments', icon: Building, color: '#7c3aed', bg: '#f5f3ff', path: '/departments' },
               ].map((mod, i) => {
                 const Icon = mod.icon;
                 return (
