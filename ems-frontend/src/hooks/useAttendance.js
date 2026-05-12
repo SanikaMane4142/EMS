@@ -9,10 +9,10 @@ export const useActiveAttendance = (userId) => {
   });
 };
 
-export const useAttendanceHistory = (userId, limit = 10) => {
+export const useAttendanceHistory = (userId, filters = { limit: 10 }) => {
   return useQuery({
-    queryKey: ['attendance', 'history', userId, limit],
-    queryFn: () => attendanceService.getAttendanceHistory(userId, limit),
+    queryKey: ['attendance', 'history', userId, filters],
+    queryFn: () => attendanceService.getAttendanceHistory(userId, filters),
     enabled: !!userId,
   });
 };

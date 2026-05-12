@@ -43,7 +43,8 @@ export const profileService = {
   },
 
   /**
-   * Update a user's profile
+   * Update a user's profile.
+   * Includes a fallback to handle missing columns (like 'birthday') gracefully.
    */
   async updateProfile(id, profileData) {
     const { data, error } = await supabase
@@ -51,7 +52,25 @@ export const profileService = {
       .update(profileData)
       .eq('id', id)
       .select()
-      .single();
+      .maybeSingle();
+
+    if (error && error.code === 'PGRST204') {
+      // Column missing error - try to filter out problematic columns and retry
+      console.warn('[profileService] Some columns are missing in the database. Retrying with basic fields...');
+      
+      const { full_name, phone, ...rest } = profileData;
+      const safeData = { full_name, phone };
+      
+      const { data: retryData, error: retryError } = await supabase
+        .from('profiles')
+        .update(safeData)
+        .eq('id', id)
+        .select()
+        .maybeSingle();
+        
+      if (retryError) throw retryError;
+      return retryData;
+    }
 
     if (error) throw error;
     return data;
@@ -94,7 +113,7 @@ export const profileService = {
         .from('profiles')
         .select('full_name, birthday, designation, departments!profiles_department_id_fkey(name)')
         .not('birthday', 'is', null)
-        .order('birthday');
+        .eq('status', 'active');
 
       if (error) {
         console.warn('[profileService] getUpcomingBirthdays failed:', error.message);
@@ -102,13 +121,51 @@ export const profileService = {
       }
 
       const now = new Date();
-      return (data || []).filter(p => {
-        const bday = new Date(p.birthday);
-        return (
-          bday.getMonth() === now.getMonth() ||
-          bday.getMonth() === (now.getMonth() + 1) % 12
-        );
-      }).slice(0, 5);
+      const todayMonth = now.getMonth(); // 0-11
+      const todayDay = now.getDate(); // 1-31
+      
+      // Rule: If today is after the 15th, extend visibility to the 15th of next month
+      const isEndOfMonth = todayDay > 15;
+
+      return (data || [])
+        .map(p => {
+          // Timezone-safe parsing: YYYY-MM-DD
+          const parts = p.birthday.split('-');
+          return { 
+            ...p, 
+            bMonth: parseInt(parts[1], 10) - 1, // Convert 1-12 to 0-11
+            bDay: parseInt(parts[2], 10) 
+          };
+        })
+        .filter(p => {
+          // Rule 1: Show birthdays starting from today's date in current month
+          if (p.bMonth === todayMonth) {
+            return p.bDay >= todayDay;
+          }
+          
+          // Rule 2: If near end of month, include up to 15th of next month
+          if (isEndOfMonth) {
+            const nextMonth = (todayMonth + 1) % 12;
+            if (p.bMonth === nextMonth) {
+              return p.bDay <= 15;
+            }
+          }
+          
+          return false;
+        })
+        .sort((a, b) => {
+          // Sort chronologically by nearest upcoming date (ignoring year)
+          // Handle year wrap-around (e.g., Dec to Jan)
+          let m_a = a.bMonth;
+          let m_b = b.bMonth;
+          
+          if (m_a < todayMonth) m_a += 12;
+          if (m_b < todayMonth) m_b += 12;
+          
+          if (m_a !== m_b) return m_a - m_b;
+          return a.bDay - b.bDay;
+        })
+        .slice(0, 8); // Keep the list clean and short
     } catch (err) {
       console.warn('[profileService] getUpcomingBirthdays unexpected error:', err.message);
       return [];

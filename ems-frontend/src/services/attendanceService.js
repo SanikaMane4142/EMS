@@ -79,50 +79,35 @@ export const attendanceService = {
 
   /**
    * Punch Out — updates the record and calculates total hours.
+   * Capped at 8 hours automatically if the duration exceeds it.
    */
   async punchOut(recordId, punchInTime, lunchDurationMs = 0) {
     const punchOutTime = new Date();
     const diffMs = punchOutTime - new Date(punchInTime);
     const netMs = Math.max(0, diffMs - lunchDurationMs);
-    const totalHours = parseFloat((netMs / (1000 * 60 * 60)).toFixed(2));
+    let totalHours = parseFloat((netMs / (1000 * 60 * 60)).toFixed(2));
+    
+    let status = 'punched_out';
+
+    // Enforcement: Capped at 8 hours regular shift
+    if (totalHours > 8) {
+      totalHours = 8.00;
+      status = 'auto_punched_out';
+    }
 
     const { data, error } = await supabase
       .from('attendance')
       .update({
         punch_out_time: punchOutTime.toISOString(),
         total_hours: totalHours,
-        status: 'punched_out',
+        status: status,
       })
       .eq('id', recordId)
       .select()
       .single();
 
     if (error) throw error;
-    console.log('[Attendance] Punched out. Total hours:', totalHours);
-    return data;
-  },
-
-  /**
-   * Auto Punch Out — for overnight/missed punch-outs.
-   */
-  async autoPunchOut(recordId, punchInTime, lunchDurationMs = 0) {
-    const autoOutTime = new Date(new Date(punchInTime).getTime() + 8 * 60 * 60 * 1000);
-    const diffMs = autoOutTime - new Date(punchInTime);
-    const netMs = Math.max(0, diffMs - lunchDurationMs);
-    const totalHours = parseFloat((netMs / (1000 * 60 * 60)).toFixed(2));
-
-    const { data, error } = await supabase
-      .from('attendance')
-      .update({
-        punch_out_time: autoOutTime.toISOString(),
-        total_hours: totalHours,
-        status: 'auto_punched_out',
-      })
-      .eq('id', recordId)
-      .select()
-      .single();
-
-    if (error) throw error;
+    console.log(`[Attendance] Punched out. Status: ${status}, Hours: ${totalHours}`);
     return data;
   },
 
@@ -217,15 +202,29 @@ export const attendanceService = {
   },
 
   /**
-   * Get recent attendance history for the employee.
+   * Get attendance history for the employee with optional filtering.
    */
-  async getAttendanceHistory(userId, limit = 10) {
-    const { data, error } = await supabase
+  async getAttendanceHistory(userId, { limit = 10, days = null, startDate = null } = {}) {
+    let query = supabase
       .from('attendance')
       .select('*')
       .eq('user_id', userId)
-      .order('attendance_date', { ascending: false })
-      .limit(limit);
+      .order('attendance_date', { ascending: false });
+
+    if (startDate) {
+      query = query.gte('attendance_date', startDate);
+    } else if (days) {
+      const d = new Date();
+      d.setDate(d.getDate() - days);
+      const minDate = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+      query = query.gte('attendance_date', minDate);
+    }
+
+    if (limit && !startDate && !days) {
+      query = query.limit(limit);
+    }
+
+    const { data, error } = await query;
 
     if (error) throw error;
     return data || [];

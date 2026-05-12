@@ -1,29 +1,39 @@
-import React, { useState, useEffect } from "react";
-import { Calendar, CheckCircle2, Clock, Download, AlertCircle, CalendarDays, Play, Square, MoreVertical, TrendingUp } from "lucide-react";
-import { Box, Chip, Avatar, Skeleton } from '@mui/material';
+import React, { useState } from "react";
+import { Calendar, CheckCircle2, Clock, CalendarDays, TrendingUp } from "lucide-react";
+import { Box, Skeleton } from '@mui/material';
 import PageHeader from '../components/PageHeader';
 import StatCard from '../components/StatCard';
 import { useAuth } from '../context/AuthContext';
-import { useActiveAttendance, useAttendanceHistory, usePunchIn, usePunchOut } from '../hooks/useAttendance';
+import { useAttendanceHistory } from '../hooks/useAttendance';
 import { useMyLeaves } from '../hooks/useLeaves';
-
 const MyAttendance = () => {
   const { user } = useAuth();
-  const [currentTime, setCurrentTime] = useState(new Date());
+  const [filter, setFilter] = useState('10');
+
+  const getFilterParams = (f) => {
+    switch (f) {
+      case 'week': {
+        const today = new Date();
+        const day = today.getDay();
+        const diff = today.getDate() - day + (day === 0 ? -6 : 1);
+        const monday = new Date(today.setDate(diff));
+        return { startDate: monday.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) };
+      }
+      case 'month': {
+        const today = new Date();
+        const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+        return { startDate: firstDay.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) };
+      }
+      case '30days':
+        return { days: 30 };
+      default:
+        return { limit: 10 };
+    }
+  };
 
   // ── Queries ────────────────────────────────────────────────────────────────
-  const { data: record, isLoading: attendanceLoading } = useActiveAttendance(user?.id);
-  const { data: history = [], isLoading: historyLoading } = useAttendanceHistory(user?.id, 10);
+  const { data: history = [], isLoading: historyLoading } = useAttendanceHistory(user?.id, getFilterParams(filter));
   const { data: myLeaves = [] } = useMyLeaves(user?.id);
-
-  // ── Mutations ──────────────────────────────────────────────────────────────
-  const punchInMutation = usePunchIn();
-  const punchOutMutation = usePunchOut();
-
-  useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   // ── Derived Stats ─────────────────────────────────────────────────────────
   const approvedLeaves = myLeaves.filter(l => l.status === 'approved').length;
@@ -37,62 +47,9 @@ const MyAttendance = () => {
     { label: "Avg. Daily", value: historyLoading ? '...' : (daysPresent > 0 ? (totalHours / daysPresent).toFixed(1) + 'h' : '0h'), icon: TrendingUp, color: "#8b5cf6", bg: "#f5f3ff" },
   ];
 
-  const isPunchedIn = record?.status === 'punched_in';
-
-  const handlePunch = async () => {
-    try {
-      if (!isPunchedIn) {
-        await punchInMutation.mutateAsync(user.id);
-      } else {
-        await punchOutMutation.mutateAsync({
-          recordId: record.id,
-          punchInTime: record.punch_in_time,
-          lunchDurationMs: record.lunch_duration_ms || 0
-        });
-      }
-    } catch (err) {
-      alert('Action failed: ' + err.message);
-    }
-  };
-
   return (
     <div className="animate-in fade-in duration-500">
       <PageHeader title="My Attendance" subtitle="Track your daily presence and work hours" />
-
-      {/* Punch Card Section */}
-      <Box className="card-ems-static" sx={{ p: 4, mb: 4, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
-        <div className="flex items-center gap-6">
-          <div className={`relative w-16 h-16 rounded-full flex items-center justify-center border-2 border-dashed ${isPunchedIn ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-slate-50'}`}>
-            <div className={`w-3 h-3 rounded-full ${isPunchedIn ? 'bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)] animate-pulse' : 'bg-slate-300'}`} />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold text-slate-900">
-              {attendanceLoading ? "Checking status..." : isPunchedIn ? "You are Punched In" : "Ready to start your day?"}
-            </h2>
-            <p className="text-sm text-slate-500 font-medium">
-              {isPunchedIn
-                ? `Punched in at ${new Date(record.punch_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-                : "Please punch in to track your attendance."}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-10">
-          <div className="text-right">
-            <div className="text-2xl font-black text-slate-900 tabular-nums">{currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</div>
-            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">{currentTime.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</div>
-          </div>
-          <button
-            className={`btn-ems h-14 px-8 text-base shadow-lg transition-all ${isPunchedIn ? 'btn-ems-danger !shadow-red-200' : 'btn-ems-primary !shadow-indigo-200'}`}
-            onClick={handlePunch}
-            disabled={attendanceLoading || punchInMutation.isPending || punchOutMutation.isPending}
-          >
-            {punchInMutation.isPending || punchOutMutation.isPending
-              ? "Processing..."
-              : isPunchedIn ? <><Square size={20} /> Punch Out</> : <><Play size={20} /> Punch In</>}
-          </button>
-        </div>
-      </Box>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -109,6 +66,19 @@ const MyAttendance = () => {
               <TrendingUp size={20} />
             </div>
             <h2 className="text-base font-bold text-slate-900">Attendance History</h2>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Filter:</span>
+            <select 
+              className="form-input-premium !w-40 !h-10 !text-xs !py-0 !bg-slate-50 border-none cursor-pointer hover:bg-slate-100 transition-colors"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            >
+              <option value="10">Last 10 Records</option>
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+              <option value="30days">Last 30 Days</option>
+            </select>
           </div>
         </div>
 

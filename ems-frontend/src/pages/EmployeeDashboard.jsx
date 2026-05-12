@@ -9,7 +9,6 @@ import StatCard from '../components/StatCard';
 // Hooks
 import { useActiveAttendance, useAttendanceHistory, usePunchIn, usePunchOut, useStartLunch, useResumeWork, useStartOvertime, useEndOvertime } from '../hooks/useAttendance';
 import { useTodayReport, useSubmitReport } from '../hooks/useReports';
-import { useMyLeaves } from '../hooks/useLeaves';
 import { useMyTasks } from '../hooks/useTasks';
 import { profileService } from '../services/profileService';
 import { reportService } from '../services/reportService';
@@ -67,7 +66,6 @@ const EmployeeDashboard = () => {
   const { data: record, isLoading: attendanceLoading } = useActiveAttendance(user?.id);
   const { data: history = [], isLoading: historyLoading } = useAttendanceHistory(user?.id, 5);
   const { data: todayReport, isLoading: reportLoading } = useTodayReport(user?.id);
-  const { data: myLeaves = [] } = useMyLeaves(user?.id);
   const { data: team = [], isLoading: teamLoading } = { data: [], isLoading: false }; // We'll fetch team separately to keep it simple
 
   const punchInMutation = usePunchIn();
@@ -114,6 +112,12 @@ const EmployeeDashboard = () => {
     // Fetch New Modules
     communicationService.getLatestAnnouncements(5).then(setAnnouncements);
     employeeService.getTodayCelebrations().then(setTodayCelebrations);
+
+    // Fetch Birthdays and Team Members
+    profileService.getUpcomingBirthdays().then(setBirthdays);
+    if (profile?.department_id) {
+      profileService.getDepartmentMembers(profile.department_id).then(setTeamMembers);
+    }
 
     // Realtime subscription for announcements
     const channel = supabase
@@ -191,8 +195,7 @@ const EmployeeDashboard = () => {
   const remainingMs = Math.max(0, SHIFT_MS - elapsedMs);
   const isLunchExceeded = isLunchBreak && lunchElapsedMs >= LUNCH_LIMIT_MS;
 
-  // Calculate leave balance: 15 base - approved leaves
-  const leaveBalance = 15 - myLeaves.filter(l => l.status === 'approved').length;
+
 
   const statusLabel = loading
     ? 'Loading...'
@@ -245,21 +248,7 @@ const EmployeeDashboard = () => {
     }
   };
 
-  const handleAutoPunchOut = async () => {
-    if (!record?.id) return;
-    try {
-      setActionLoading(true);
-      await punchOutMutation.mutateAsync({
-        recordId: record.id,
-        punchInTime: record.punch_in_time,
-        lunchDurationMs: record.lunch_duration_ms || 0
-      });
-    } catch (err) {
-      alert('Auto punch-out failed: ' + err.message);
-    } finally {
-      setActionLoading(false);
-    }
-  };
+
 
   const handleStartLunch = async () => {
     if (!record?.id) return;
@@ -524,10 +513,10 @@ const EmployeeDashboard = () => {
                   ) : (
                     <button
                       className={`btn-ems w-full h-12 rounded-[14px] ${isShiftComplete ? 'btn-ems-danger shadow-lg shadow-red-100' : 'btn-ems-secondary'}`}
-                      onClick={isShiftComplete ? handleAutoPunchOut : handlePunchOut}
+                      onClick={handlePunchOut}
                       disabled={actionLoading || (isPunchedIn && !isHalfDayComplete)}
                     >
-                      <Square size={18} /> {isShiftComplete ? 'Punch Out (Completed)' : 'Punch Out'}
+                      <Square size={18} /> {isShiftComplete ? 'Punch Out (8h Cap Applied)' : 'Punch Out'}
                     </button>
                   )}
                 </div>
@@ -890,22 +879,7 @@ const EmployeeDashboard = () => {
             </div>
           </Box>
 
-          {/* Leave CTA */}
-          <Box sx={{
-            p: 3, borderRadius: '14px',
-            background: 'linear-gradient(135deg, #4f46e5 0%, #3730a3 100%)',
-            color: '#fff',
-          }}>
-            <h3 className="text-base font-bold mb-1">Need a Break?</h3>
-            <p className="text-sm opacity-70 mb-4">You have {leaveBalance} annual leave days remaining. Take a rest!</p>
-            <button className="btn-ems w-full" style={{
-              height: 42, background: 'rgba(255,255,255,0.15)',
-              color: '#fff', border: '1px solid rgba(255,255,255,0.25)',
-              borderRadius: '10px', fontWeight: 700
-            }}>
-              Apply for Leave
-            </button>
-          </Box>
+
 
           {/* Upcoming Birthdays */}
           <Box className="card-ems-static" sx={{ p: 3 }}>
