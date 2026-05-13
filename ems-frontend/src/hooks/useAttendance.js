@@ -55,7 +55,8 @@ export const usePunchIn = () => {
 export const usePunchOut = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ recordId, punchInTime }) => attendanceService.punchOut(recordId, punchInTime),
+    mutationFn: ({ recordId, punchInTime, lunchDurationMs = 0 }) =>
+      attendanceService.punchOut(recordId, punchInTime, lunchDurationMs),
     onSuccess: (data) => {
       const userId = data.user_id;
       queryClient.invalidateQueries({ queryKey: ['attendance', 'active', userId] });
@@ -68,7 +69,7 @@ export const usePunchOut = () => {
 export const useStartLunch = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (recordId) => attendanceService.startLunch(recordId),
+    mutationFn: (recordId) => attendanceService.startLunchBreak(recordId),
     onSuccess: (data) => {
       const userId = data.user_id;
       queryClient.invalidateQueries({ queryKey: ['attendance', 'active', userId] });
@@ -79,7 +80,8 @@ export const useStartLunch = () => {
 export const useResumeWork = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ recordId, reason }) => attendanceService.resumeWork(recordId, reason),
+    mutationFn: ({ recordId, lunchStartTime, currentDurationMs = 0, reason = null }) =>
+      attendanceService.endLunchBreak(recordId, lunchStartTime, currentDurationMs, reason),
     onSuccess: (data) => {
       const userId = data.user_id;
       queryClient.invalidateQueries({ queryKey: ['attendance', 'active', userId] });

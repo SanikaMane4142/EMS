@@ -10,6 +10,21 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const clearAuthState = () => {
+    setUser(null);
+    setProfile(null);
+  };
+
+  const safeSignOut = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.warn('Supabase signOut error:', err?.message || err);
+    } finally {
+      clearAuthState();
+    }
+  };
+
   /**
    * PRODUCTION ROLE VERIFICATION
    * Fetches profile and enforces strict access rules
@@ -31,17 +46,17 @@ export const AuthProvider = ({ children }) => {
           console.error('Profile fetch error:', profileError.message);
           setError('Failed to load profile. Please try again.');
         }
+        await safeSignOut();
         return null;
       }
       if (!data) {
         setError('Profile not found. Please contact your administrator.');
+        await safeSignOut();
         return null;
       }
 
       if (data.status === 'inactive') {
-        await supabase.auth.signOut();
-        setUser(null);
-        setProfile(null);
+        await safeSignOut();
         setError('Your account has been deactivated.');
         return null;
       }
@@ -51,9 +66,7 @@ export const AuthProvider = ({ children }) => {
         if (data.role === 'super_admin' && isAdminLevel(expectedRole)) {
           // Allow
         } else {
-          await supabase.auth.signOut();
-          setUser(null);
-          setProfile(null);
+          await safeSignOut();
           setError(`Role mismatch: you are registered as ${data.role.toUpperCase()}, not ${expectedRole.toUpperCase()}.`);
           return null;
         }
@@ -65,6 +78,7 @@ export const AuthProvider = ({ children }) => {
     } catch (err) {
       console.error('verifyAndFetchProfile error:', err.message);
       setError('Failed to load profile. Please try again.');
+      await safeSignOut();
       return null;
     }
   };
@@ -143,7 +157,7 @@ export const AuthProvider = ({ children }) => {
     const verifiedProfile = await verifyAndFetchProfile(data.user.id);
     if (!verifiedProfile) {
       // Error already set in state by verifyAndFetchProfile
-      throw new Error(error || 'Login failed. Please check your role and try again.');
+      throw new Error('Login failed. Please check your profile mapping and role.');
     }
     return data.user;
   };

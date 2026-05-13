@@ -265,7 +265,12 @@ const EmployeeDashboard = () => {
     if (!record?.id || !record?.lunch_start_time) return;
     try {
       setActionLoading(true);
-      await resumeWorkMutation.mutateAsync({ recordId: record.id, reason });
+      await resumeWorkMutation.mutateAsync({
+        recordId: record.id,
+        lunchStartTime: record.lunch_start_time,
+        currentDurationMs: record.lunch_duration_ms || 0,
+        reason,
+      });
       setShowResumeModal(false);
       setResumeReason('');
     } catch (err) {

@@ -125,7 +125,7 @@ const Login = () => {
             style={{ height: 52, fontSize: 16, marginTop: 8, borderRadius: '14px' }}
             disabled={isSubmitting || authLoading}
           >
-            {(isSubmitting || authLoading) ? 'Verifying Identity...' : 'Sign In'}
+            {isSubmitting ? 'Verifying Identity...' : 'Login'}
           </button>
         </form>
 
