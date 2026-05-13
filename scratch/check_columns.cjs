@@ -1,34 +1,18 @@
-
 const { createClient } = require('@supabase/supabase-js');
-const fs = require('fs');
-const path = require('path');
 
-// Read .env file manually
-const envPath = path.resolve(__dirname, '../ems-frontend/.env');
-const envContent = fs.readFileSync(envPath, 'utf8');
-const env = {};
-envContent.split('\n').forEach(line => {
-    const [key, value] = line.split('=');
-    if (key && value) env[key.trim()] = value.trim();
-});
-
-const supabaseUrl = env.VITE_SUPABASE_URL;
-const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY;
+const supabaseUrl = 'https://pflcpzwwokcynwreqjho.supabase.co';
+const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBmbGNwend3b2tjeW53cmVxamhvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczNDc5MjAsImV4cCI6MjA5MjkyMzkyMH0.HAAUEO8u_KIoqWxLpunqK5I2ahbbvXsW7haYebuBfGQ';
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-async function checkColumns() {
-    // We can use the RPC or a simple query to see if we can select updated_at
-    const { data, error } = await supabase
-        .from('profiles')
-        .select('updated_at')
-        .limit(1);
-    
-    if (error) {
-        console.error('Error selecting updated_at from profiles:', error);
-    } else {
-        console.log('Successfully selected updated_at from profiles');
-    }
+async function check() {
+  console.log('Checking task_groups is_completed column...');
+  const { data, error } = await supabase.from('task_groups').select('is_completed').limit(1);
+  if (error) {
+    console.error('Error:', error);
+  } else {
+    console.log('task_groups columns:', data[0] ? Object.keys(data[0]) : 'Empty table');
+  }
 }
 
-checkColumns();
+check();
