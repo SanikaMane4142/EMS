@@ -4,7 +4,9 @@ import { supabase } from '../lib/supabaseClient';
  * Returns today's date string in YYYY-MM-DD format using Asia/Kolkata (IST) timezone.
  * This is the SINGLE source of truth for "today" across the entire attendance system.
  */
-const getTodayIST = () => {
+const getTodayIST = async () => {
+  const { data, error } = await supabase.rpc('get_today_ist');
+  if (!error && data) return data;
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 };
 
@@ -17,7 +19,7 @@ export const attendanceService = {
    *   2. Any record for today's date (covers punched_out / auto_punched_out)
    */
   async getActiveRecord(userId) {
-    const today = getTodayIST();
+    const today = await getTodayIST();
 
     // Step 1: Look for an ongoing (punched_in) shift — catches refreshes and post-logout re-logins
     const { data: activeShift, error: activeErr } = await supabase
@@ -53,27 +55,12 @@ export const attendanceService = {
    * Uses IST date so the attendance_date column always matches the user's local day.
    */
   async punchIn(userId) {
-    const now = new Date();
-    const today = getTodayIST();
-
-    const { data, error } = await supabase
-      .from('attendance')
-      .upsert(
-        {
-          user_id: userId,
-          attendance_date: today,
-          punch_in_time: now.toISOString(),
-          punch_out_time: null,
-          total_hours: null,
-          status: 'punched_in',
-        },
-        { onConflict: 'user_id,attendance_date' }
-      )
-      .select()
-      .single();
+    const { data, error } = await supabase.rpc('attendance_punch_in', {
+      p_user_id: userId,
+    });
 
     if (error) throw error;
-    console.log('[Attendance] Punched in at', now.toISOString());
+    console.log('[Attendance] Punched in using server time');
     return data;
   },
 
@@ -82,32 +69,13 @@ export const attendanceService = {
    * Capped at 8 hours automatically if the duration exceeds it.
    */
   async punchOut(recordId, punchInTime, lunchDurationMs = 0) {
-    const punchOutTime = new Date();
-    const diffMs = punchOutTime - new Date(punchInTime);
-    const netMs = Math.max(0, diffMs - lunchDurationMs);
-    let totalHours = parseFloat((netMs / (1000 * 60 * 60)).toFixed(2));
-
-    let status = 'punched_out';
-
-    // Enforcement: Capped at 8 hours regular shift
-    if (totalHours > 8) {
-      totalHours = 8.00;
-      status = 'auto_punched_out';
-    }
-
-    const { data, error } = await supabase
-      .from('attendance')
-      .update({
-        punch_out_time: punchOutTime.toISOString(),
-        total_hours: totalHours,
-        status: status,
-      })
-      .eq('id', recordId)
-      .select()
-      .single();
+    const { data, error } = await supabase.rpc('attendance_punch_out', {
+      p_record_id: recordId,
+      p_lunch_duration_ms: lunchDurationMs || 0,
+    });
 
     if (error) throw error;
-    console.log(`[Attendance] Punched out. Status: ${status}, Hours: ${totalHours}`);
+    console.log(`[Attendance] Punched out using server time. Status: ${data?.status}`);
     return data;
   },
 
@@ -115,18 +83,12 @@ export const attendanceService = {
    * Start Lunch Break — marks the start of a lunch break.
    */
   async startLunchBreak(recordId) {
-    const now = new Date();
-    const { data, error } = await supabase
-      .from('attendance')
-      .update({
-        lunch_start_time: now.toISOString(),
-      })
-      .eq('id', recordId)
-      .select()
-      .single();
+    const { data, error } = await supabase.rpc('attendance_start_lunch_break', {
+      p_record_id: recordId,
+    });
 
     if (error) throw error;
-    console.log('[Attendance] Started lunch break at', now.toISOString());
+    console.log('[Attendance] Started lunch break using server time');
     return data;
   },
 
@@ -134,29 +96,14 @@ export const attendanceService = {
    * End Lunch Break — calculates duration and updates record.
    */
   async endLunchBreak(recordId, lunchStartTime, currentDurationMs = 0, delayReason = null) {
-    const now = new Date();
-    const breakMs = now - new Date(lunchStartTime);
-    const newDuration = currentDurationMs + breakMs;
-
-    const updatePayload = {
-      lunch_start_time: null,
-      lunch_end_time: now.toISOString(),
-      lunch_duration_ms: newDuration,
-    };
-
-    if (delayReason) {
-      updatePayload.lunch_delay_reason = delayReason;
-    }
-
-    const { data, error } = await supabase
-      .from('attendance')
-      .update(updatePayload)
-      .eq('id', recordId)
-      .select()
-      .single();
+    const { data, error } = await supabase.rpc('attendance_end_lunch_break', {
+      p_record_id: recordId,
+      p_current_duration_ms: currentDurationMs || 0,
+      p_delay_reason: delayReason,
+    });
 
     if (error) throw error;
-    console.log('[Attendance] Ended lunch break. Total duration MS:', newDuration);
+    console.log('[Attendance] Ended lunch break using server time');
     return data;
   },
 
@@ -230,11 +177,65 @@ export const attendanceService = {
     return data || [];
   },
 
+  async submitAbsenceReason(attendanceId, userId, reason) {
+    const { data, error } = await supabase
+      .from('attendance_explanations')
+      .upsert(
+        {
+          attendance_id: attendanceId,
+          user_id: userId,
+          reason,
+          status: 'pending',
+          reviewer_note: null,
+          reviewed_by: null,
+          reviewed_at: null,
+        },
+        { onConflict: 'attendance_id' }
+      )
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  async getPendingAbsenceExplanations({ startDate = null, endDate = null } = {}) {
+    const query = supabase
+      .from('attendance_explanations')
+      .select('*')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
+  },
+
+  async reviewAbsenceExplanation(explanationId, status, reviewerNote = null) {
+    const payload = {
+      status,
+      reviewer_note: reviewerNote,
+      reviewed_at: new Date().toISOString(),
+    };
+    const { data: reviewer } = await supabase.auth.getUser();
+    if (reviewer?.user?.id) payload.reviewed_by = reviewer.user.id;
+
+    const { data, error } = await supabase
+      .from('attendance_explanations')
+      .update(payload)
+      .eq('id', explanationId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
   /**
    * [HR/ADMIN] Get today's attendance statistics using IST date.
    */
   async getTodayStats() {
-    const today = getTodayIST();
+    const today = await getTodayIST();
 
     const { data, error } = await supabase
       .from('attendance')
@@ -300,6 +301,13 @@ export const attendanceService = {
           designation,
           employee_id,
           departments!profiles_department_id_fkey (name)
+        ),
+        attendance_explanations:attendance_explanations!attendance_id (
+          id,
+          reason,
+          status,
+          reviewer_note,
+          reviewed_at
         )
       `);
 
@@ -346,13 +354,22 @@ export const attendanceService = {
       return {
         id: item.id,
         date: item.attendance_date,
+        rawStatus: item.status,
         name: p.full_name || p.email || 'Unknown',
         email: p.email || '-',
         empId: p.employee_id || '-',
         dept: p.departments?.name || p.designation || 'Staff',
         punchIn: item.punch_in_time ? new Date(item.punch_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-',
         punchOut: item.punch_out_time ? new Date(item.punch_out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-',
-        status: item.status === 'punched_in' ? 'Present' : (item.status === 'punched_out' || item.status === 'auto_punched_out' ? 'Left' : 'Absent'),
+        status:
+          item.status === 'punched_in' ? 'Present'
+            : (item.status === 'punched_out' || item.status === 'auto_punched_out') ? 'Left'
+              : item.status === 'on_leave' ? 'On Leave'
+                : item.status === 'absent_unjustified' ? 'Absent !'
+                  : item.status === 'absent_explanation_pending' ? 'Reason Pending'
+                    : item.status === 'absent_explained' ? 'Absent Explained'
+                      : 'Absent',
+        absenceExplanation: item.attendance_explanations?.[0] || null,
         lunchDuration: lunchMin,
         totalHours: item.total_hours || 0,
         overtime: item.overtime_duration_ms ? parseFloat((item.overtime_duration_ms / 3600000).toFixed(2)) : 0

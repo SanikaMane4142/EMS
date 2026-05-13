@@ -91,6 +91,8 @@ const Layout = ({ children }) => {
 
   const handleLogout = async () => {
     setProfileAnchor(null);
+    setNotifAnchor(null);
+    setDrawerOpen(false);
 
     const result = await Swal.fire({
       title: 'Sign Out?',
@@ -107,10 +109,20 @@ const Layout = ({ children }) => {
     if (result.isConfirmed) {
       try {
         await logout();
-        navigate('/login', { replace: true });
       } catch (err) {
         console.error('Logout failed:', err);
-        window.location.href = '/login';
+      } finally {
+        // Prevent stale modal/backdrop overlays from trapping the UI.
+        Swal.close();
+        document.body.classList.remove('swal2-height-auto');
+        document.body.style.removeProperty('overflow');
+        navigate('/login', { replace: true });
+        // Hard fallback in case router navigation is blocked by transient UI state.
+        setTimeout(() => {
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login';
+          }
+        }, 150);
       }
     }
   };

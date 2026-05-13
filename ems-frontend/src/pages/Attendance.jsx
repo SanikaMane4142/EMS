@@ -1,13 +1,13 @@
 import React, { useState, useMemo } from 'react';
-import { Box, Avatar, Chip, Tooltip, IconButton, Fade } from '@mui/material';
+import { Box, Avatar } from '@mui/material';
 import {
   UserCheck, UserX, Clock, Download, Calendar, Search,
-  Filter, MoreHorizontal, MapPin, Plane, ArrowUpRight,
+  MapPin, Plane, ArrowUpRight, Check, X,
   TrendingUp, RefreshCw, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { utils, writeFile, write } from 'xlsx';
 import PageHeader from '../components/PageHeader';
-import { useAttendanceOverview } from '../hooks/useAttendance';
+import { useAttendanceOverview, usePendingAbsenceExplanations, useReviewAbsenceExplanation } from '../hooks/useAttendance';
 import { useDepartments } from '../hooks/useDepartments';
 import { useEmployees } from '../hooks/useEmployees';
 import { useAuth } from '../context/AuthContext';
@@ -18,6 +18,9 @@ const STATUS_CONFIG = {
   'Present': { color: '#10b981', bg: '#ecfdf5', label: 'Present', icon: UserCheck },
   'Late': { color: '#f59e0b', bg: '#fffbeb', label: 'Late', icon: Clock },
   'Absent': { color: '#ef4444', bg: '#fef2f2', label: 'Absent', icon: UserX },
+  'Absent !': { color: '#ef4444', bg: '#fef2f2', label: 'Absent !', icon: UserX },
+  'Reason Pending': { color: '#f59e0b', bg: '#fffbeb', label: 'Reason Pending', icon: Clock },
+  'Absent Explained': { color: '#eab308', bg: '#fef9c3', label: 'Absent Explained', icon: Clock },
   'On Leave': { color: '#8b5cf6', bg: '#f5f3ff', label: 'On Leave', icon: Plane },
   'Remote': { color: '#3b82f6', bg: '#eff6ff', label: 'Remote', icon: MapPin },
 };
@@ -41,8 +44,14 @@ const Attendance = () => {
   });
 
   const { data: departments = [] } = useDepartments();
+  const { data: pendingExplanations = [] } = usePendingAbsenceExplanations({ startDate, endDate });
+  const reviewExplanationMutation = useReviewAbsenceExplanation();
+  const pendingExplanationByAttendanceId = useMemo(
+    () => Object.fromEntries((pendingExplanations || []).map((p) => [p.attendance_id, p])),
+    [pendingExplanations]
+  );
 
-  // Process data to add "Late" and "Remote" (simulated for UI)
+  // Process data and apply derived display status
   const attendance = useMemo(() => {
     return rawAttendance.map(item => {
       let status = item.status;
@@ -68,11 +77,6 @@ const Attendance = () => {
         }
       }
 
-      // Simulate "Remote" for certain depts (just for design demo)
-      if (item.dept === 'Engineering' && Math.random() > 0.8) {
-        status = 'Remote';
-      }
-
       return { ...item, displayStatus: status };
     }).filter(item => statusFilter === 'all' || item.displayStatus === statusFilter);
   }, [rawAttendance, statusFilter]);
@@ -87,11 +91,20 @@ const Attendance = () => {
     return {
       present,
       late,
-      onLeave: 2, // Mocked for design parity
+      onLeave: rawAttendance.filter(a => a.rawStatus === 'on_leave').length,
       remote,
       totalHours: rawAttendance.reduce((acc, curr) => acc + (curr.totalHours || 0), 0).toFixed(1)
     };
   }, [rawAttendance, attendance]);
+
+  const handleReviewReason = async (explanationId, status) => {
+    try {
+      await reviewExplanationMutation.mutateAsync({ explanationId, status });
+      toast.success(status === 'approved' ? 'Reason approved.' : 'Reason rejected.');
+    } catch (err) {
+      toast.error(err.message || 'Action failed');
+    }
+  };
 
   const handleExport = () => {
     if (attendance.length === 0) {
@@ -195,6 +208,45 @@ const Attendance = () => {
         ))}
       </div>
 
+      {pendingExplanations.length > 0 && (
+        <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 mb-6">
+          <div className="text-xs font-black text-amber-700 uppercase tracking-wider mb-3">
+            Pending Absence Reasons ({pendingExplanations.length})
+          </div>
+          <div className="flex flex-col gap-2">
+            {pendingExplanations.slice(0, 8).map((item) => (
+              <div key={item.id} className="bg-white border border-amber-100 rounded-xl p-3 flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-sm font-bold text-slate-900">
+                    {item.employee?.full_name || item.employee?.email || 'Employee'} ({item.employee?.employee_id || '-'})
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    {item.attendance?.attendance_date} - {item.reason}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    className="btn-ems btn-ems-success"
+                    disabled={reviewExplanationMutation.isPending}
+                    onClick={() => handleReviewReason(item.id, 'approved')}
+                  >
+                    <Check size={14} /> Approve
+                  </button>
+                  <button
+                    className="btn-ems btn-ems-outline"
+                    style={{ color: '#ef4444', borderColor: '#ef4444' }}
+                    disabled={reviewExplanationMutation.isPending}
+                    onClick={() => handleReviewReason(item.id, 'rejected')}
+                  >
+                    <X size={14} /> Reject
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Advanced Filter Bar */}
       <div className="bg-white/80 backdrop-blur-xl sticky top-4 z-30 p-4 rounded-3xl border border-slate-100 shadow-xl shadow-slate-200/40 mb-8">
         <div className="flex flex-col lg:flex-row gap-6 items-center">
@@ -218,7 +270,7 @@ const Attendance = () => {
           <div className="flex flex-wrap items-center gap-4 w-full lg:w-auto">
             {/* Status Chips */}
             <div className="flex items-center gap-1.5 p-1.5 bg-slate-50 rounded-2xl">
-              {['all', 'Present', 'Late', 'Absent', 'On Leave'].map(status => (
+              {['all', 'Present', 'Late', 'Absent', 'Reason Pending', 'On Leave'].map(status => (
                 <button
                   key={status}
                   onClick={() => setStatusFilter(status)}
@@ -261,12 +313,11 @@ const Attendance = () => {
             <thead>
               <tr className="bg-slate-50/50 border-b border-slate-100">
                 <th className="px-8 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Employee Info</th>
+                <th className="px-6 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Date</th>
                 <th className="px-6 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Department</th>
                 <th className="px-6 py-5 text-center text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Status</th>
-                <th className="px-6 py-5 text-center text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Check In/Out</th>
-                <th className="px-6 py-5 text-center text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Metrics</th>
-                <th className="px-6 py-5 text-right text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Work Hours</th>
-                <th className="px-8 py-5"></th>
+                <th className="px-6 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Reason Details</th>
+                <th className="px-8 py-5 text-center text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -274,7 +325,7 @@ const Attendance = () => {
                 // Skeleton loading rows
                 [...Array(5)].map((_, i) => (
                   <tr key={i} className="animate-pulse">
-                    <td colSpan={7} className="px-8 py-10">
+                    <td colSpan={6} className="px-8 py-10">
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 bg-slate-100 rounded-2xl" />
                         <div className="space-y-2">
@@ -325,6 +376,13 @@ const Attendance = () => {
                       </div>
                     </td>
 
+                    {/* Date */}
+                    <td className="px-6 py-6">
+                      <div className="text-xs font-bold text-slate-700">
+                        {new Date(row.date + 'T00:00:00').toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' })}
+                      </div>
+                    </td>
+
                     {/* Status Pill */}
                     <td className="px-6 py-6">
                       <div className="flex justify-center">
@@ -347,65 +405,44 @@ const Attendance = () => {
                       </div>
                     </td>
 
-                    {/* Time Tracking */}
+                    {/* Reason Details */}
                     <td className="px-6 py-6">
-                      <div className="flex items-center justify-center gap-4">
-                        <div className="text-center">
-                          <div className="text-[10px] font-black text-slate-300 uppercase mb-1">In</div>
-                          <div className="font-mono text-sm font-bold text-slate-700 bg-slate-50 px-2 py-1 rounded-lg border border-slate-100">
-                            {row.punchIn}
-                          </div>
-                        </div>
-                        <div className="h-[2px] w-4 bg-slate-100 mt-4" />
-                        <div className="text-center">
-                          <div className="text-[10px] font-black text-slate-300 uppercase mb-1">Out</div>
-                          <div className="font-mono text-sm font-bold text-slate-700 bg-slate-50 px-2 py-1 rounded-lg border border-slate-100">
-                            {row.punchOut}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-
-                    {/* Compact Metric Cards */}
-                    <td className="px-6 py-6">
-                      <div className="flex items-center justify-center gap-2">
-                        <Tooltip title="Lunch Break">
-                          <div className="flex flex-col items-center p-2 rounded-xl bg-slate-50 border border-slate-100 min-w-[50px]">
-                            <span className="text-[8px] font-black text-slate-400 uppercase">Lunch</span>
-                            <span className="text-xs font-bold text-slate-700">{row.lunchDuration}m</span>
-                          </div>
-                        </Tooltip>
-                        <Tooltip title="Overtime">
-                          <div className={`flex flex-col items-center p-2 rounded-xl border min-w-[50px] ${row.overtime > 0 ? 'bg-amber-50 border-amber-100 text-amber-700' : 'bg-slate-50 border-slate-100 text-slate-400 opacity-40'}`}>
-                            <span className="text-[8px] font-black uppercase">OT</span>
-                            <span className="text-xs font-bold">{row.overtime > 0 ? `${row.overtime}h` : '--'}</span>
-                          </div>
-                        </Tooltip>
-                      </div>
-                    </td>
-
-                    {/* Work Hours Highlighting */}
-                    <td className="px-6 py-6 text-right">
-                      <div className="inline-flex flex-col items-end">
-                        <div className="text-2xl font-black text-indigo-600 tabular-nums">
-                          {row.totalHours > 0 ? row.totalHours : '0.0'}
-                          <span className="text-xs font-bold ml-1 text-slate-400">hrs</span>
-                        </div>
-                        <div className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Total Logged</div>
+                      <div className="text-xs text-slate-600 max-w-md">
+                        {(row.absenceExplanation?.reason || pendingExplanationByAttendanceId[row.id]?.reason)
+                          ? (row.absenceExplanation?.reason || pendingExplanationByAttendanceId[row.id]?.reason)
+                          : (row.displayStatus === 'Absent !' ? 'Reason not submitted yet' : '--')}
                       </div>
                     </td>
 
                     {/* Row Action */}
-                    <td className="px-8 py-6 text-right">
-                      <IconButton size="small" className="text-slate-300 hover:text-slate-600 hover:bg-slate-100">
-                        <MoreHorizontal size={18} />
-                      </IconButton>
+                    <td className="px-8 py-6 text-center">
+                      {(row.absenceExplanation?.status === 'pending' || pendingExplanationByAttendanceId[row.id]?.status === 'pending') ? (
+                        <div className="flex items-center justify-center gap-2">
+                          <button
+                            className="btn-ems btn-ems-success"
+                            disabled={reviewExplanationMutation.isPending}
+                            onClick={() => handleReviewReason((row.absenceExplanation?.id || pendingExplanationByAttendanceId[row.id]?.id), 'approved')}
+                          >
+                            <Check size={14} /> Approve
+                          </button>
+                          <button
+                            className="btn-ems btn-ems-outline"
+                            style={{ color: '#ef4444', borderColor: '#ef4444' }}
+                            disabled={reviewExplanationMutation.isPending}
+                            onClick={() => handleReviewReason((row.absenceExplanation?.id || pendingExplanationByAttendanceId[row.id]?.id), 'rejected')}
+                          >
+                            <X size={14} /> Reject
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-400">--</span>
+                      )}
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={7} className="px-8 py-20 text-center">
+                  <td colSpan={6} className="px-8 py-20 text-center">
                     <div className="flex flex-col items-center">
                       <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-4">
                         <Search size={32} className="text-slate-200" />
