@@ -142,3 +142,11 @@ export const useReviewAbsenceExplanation = () => {
     },
   });
 };
+
+export const useEmployeeDashboardStats = (userId) => {
+  return useQuery({
+    queryKey: ['attendance', 'stats', 'employee', userId],
+    queryFn: () => attendanceService.getEmployeeStats(userId),
+    enabled: !!userId,
+  });
+};
