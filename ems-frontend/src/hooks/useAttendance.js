@@ -110,3 +110,35 @@ export const useEndOvertime = () => {
     },
   });
 };
+
+export const useSubmitAbsenceReason = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ attendanceId, userId, reason }) =>
+      attendanceService.submitAbsenceReason(attendanceId, userId, reason),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['attendance', 'history', data.user_id] });
+      queryClient.invalidateQueries({ queryKey: ['attendance', 'overview'] });
+    },
+  });
+};
+
+export const usePendingAbsenceExplanations = (filters = {}) => {
+  return useQuery({
+    queryKey: ['attendance', 'absences', 'pending', filters],
+    queryFn: () => attendanceService.getPendingAbsenceExplanations(filters),
+  });
+};
+
+export const useReviewAbsenceExplanation = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ explanationId, status, reviewerNote = null }) =>
+      attendanceService.reviewAbsenceExplanation(explanationId, status, reviewerNote),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['attendance', 'absences', 'pending'] });
+      queryClient.invalidateQueries({ queryKey: ['attendance', 'overview'] });
+      queryClient.invalidateQueries({ queryKey: ['attendance', 'history'] });
+    },
+  });
+};
