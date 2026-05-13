@@ -358,5 +358,40 @@ export const attendanceService = {
         overtime: item.overtime_duration_ms ? parseFloat((item.overtime_duration_ms / 3600000).toFixed(2)) : 0
       };
     });
+  },
+
+  /**
+   * [EMPLOYEE] Get performance stats for the current month.
+   */
+  async getEmployeeStats(userId) {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = today.getMonth() + 1;
+    const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+
+    const { data, error } = await supabase
+      .from('attendance')
+      .select('total_hours, attendance_date, status')
+      .eq('user_id', userId)
+      .gte('attendance_date', startDate);
+
+    if (error) throw error;
+
+    // Calculate Attendance Rate
+    // Formula: (Days Present / Total Days Passed in Month) * 100
+    const daysPassed = today.getDate();
+    const presentDays = data.filter(r => ['punched_in', 'punched_out', 'auto_punched_out'].includes(r.status)).length;
+    const attendanceRate = daysPassed > 0 ? Math.round((presentDays / daysPassed) * 100) : 0;
+
+    // Calculate Avg Working Hours (only for days worked)
+    const workedDays = data.filter(r => r.total_hours > 0);
+    const totalHours = workedDays.reduce((sum, r) => sum + (r.total_hours || 0), 0);
+    const avgHours = workedDays.length > 0 ? (totalHours / workedDays.length).toFixed(1) : '0';
+
+    return {
+      attendanceRate,
+      avgHours,
+      presentDays
+    };
   }
 };

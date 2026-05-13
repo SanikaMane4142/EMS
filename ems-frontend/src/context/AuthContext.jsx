@@ -94,8 +94,6 @@ export const AuthProvider = ({ children }) => {
       async (event, session) => {
         if (!isMounted) return;
 
-        console.log('[Auth] State Change:', event);
-
         if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
           queryClient.clear();
           setUser(null);
@@ -107,8 +105,8 @@ export const AuthProvider = ({ children }) => {
         try {
           if (session) {
             setUser(session.user);
-            // Note: verifyAndFetchProfile handles internal error state
-            await verifyAndFetchProfile(session.user.id);
+            // Non-blocking profile fetch to avoid hanging the auth flow
+            verifyAndFetchProfile(session.user.id);
           } else {
             setUser(null);
             setProfile(null);
@@ -116,7 +114,9 @@ export const AuthProvider = ({ children }) => {
         } catch (err) {
           console.error('Auth listener processing error:', err);
         } finally {
-          if (isMounted) setLoading(false);
+          // Only set loading false if we're not waiting for a profile fetch
+          // (verifyAndFetchProfile handles its own loading/error states if needed)
+          if (isMounted && event !== 'USER_UPDATED') setLoading(false);
         }
       }
     );

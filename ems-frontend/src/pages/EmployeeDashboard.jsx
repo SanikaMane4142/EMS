@@ -7,8 +7,8 @@ import { Clock, Play, Square, CheckCircle, AlertTriangle, Users, Calendar, FileT
 import StatCard from '../components/StatCard';
 
 // Hooks
-import { useActiveAttendance, useAttendanceHistory, usePunchIn, usePunchOut, useStartLunch, useResumeWork, useStartOvertime, useEndOvertime } from '../hooks/useAttendance';
-import { useTodayReport, useSubmitReport } from '../hooks/useReports';
+import { useActiveAttendance, useAttendanceHistory, usePunchIn, usePunchOut, useStartLunch, useResumeWork, useStartOvertime, useEndOvertime, useEmployeeDashboardStats } from '../hooks/useAttendance';
+import { useTodayReport, useSubmitReport, useMonthlyReportCount } from '../hooks/useReports';
 import { useMyTasks } from '../hooks/useTasks';
 import { profileService } from '../services/profileService';
 import { reportService } from '../services/reportService';
@@ -64,9 +64,13 @@ const EmployeeDashboard = () => {
 
   // ── Queries & Mutations ───────────────────────────────────────────────────
   const { data: record, isLoading: attendanceLoading } = useActiveAttendance(user?.id);
-  const { data: history = [], isLoading: historyLoading } = useAttendanceHistory(user?.id, 5);
+  const { data: history = [], isLoading: historyLoading } = useAttendanceHistory(user?.id, { limit: 5 });
   const { data: todayReport, isLoading: reportLoading } = useTodayReport(user?.id);
-  const { data: team = [], isLoading: teamLoading } = { data: [], isLoading: false }; // We'll fetch team separately to keep it simple
+  const { data: myTasks = [], isLoading: tasksLoading } = useMyTasks(user?.id);
+  const { data: monthlyStats, isLoading: statsLoading } = useEmployeeDashboardStats(user?.id);
+  const { data: monthlyReports, isLoading: reportsCountLoading } = useMonthlyReportCount(user?.id);
+
+  const { data: team = [], isLoading: teamLoading } = { data: [], isLoading: false };
 
   const punchInMutation = usePunchIn();
   const punchOutMutation = usePunchOut();
@@ -456,10 +460,37 @@ const EmployeeDashboard = () => {
 
       {/* Stats Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
-        <StatCard title="Attendance Rate" value={loading ? '...' : '98%'} icon={Calendar} color="#4f46e5" bgColor="#eef2ff" trend="up" trendValue="+2%" />
-        <StatCard title="Avg. Working Hours" value={loading ? '...' : '8.2h'} icon={Clock} color="#10b981" bgColor="#ecfdf5" />
-        <StatCard title="Reports Submitted" value={loading ? '...' : `${history.length}`} icon={FileText} color="#f59e0b" bgColor="#fffbeb" />
-        <StatCard title="Pending Tasks" value="3" icon={CheckCircle} color="#8b5cf6" bgColor="#f5f3ff" onClick={() => navigate('/my-tasks')} />
+        <StatCard 
+          title="Attendance Rate" 
+          value={statsLoading ? '...' : `${monthlyStats?.attendanceRate || 0}%`} 
+          icon={Calendar} 
+          color="#4f46e5" 
+          bgColor="#eef2ff" 
+          trend={monthlyStats?.attendanceRate >= 90 ? "up" : "down"} 
+          trendValue={monthlyStats?.attendanceRate >= 90 ? "+2%" : ""} 
+        />
+        <StatCard 
+          title="Avg. Working Hours" 
+          value={statsLoading ? '...' : `${monthlyStats?.avgHours || 0}h`} 
+          icon={Clock} 
+          color="#10b981" 
+          bgColor="#ecfdf5" 
+        />
+        <StatCard 
+          title="Reports Submitted" 
+          value={reportsCountLoading ? '...' : `${monthlyReports || 0}`} 
+          icon={FileText} 
+          color="#f59e0b" 
+          bgColor="#fffbeb" 
+        />
+        <StatCard 
+          title="Pending Tasks" 
+          value={tasksLoading ? '...' : `${myTasks.filter(t => t.status !== 'done').length}`} 
+          icon={CheckCircle} 
+          color="#8b5cf6" 
+          bgColor="#f5f3ff" 
+          onClick={() => navigate('/my-tasks')} 
+        />
       </div>
 
       {/* Celebration Section */}
@@ -835,36 +866,6 @@ const EmployeeDashboard = () => {
             </div>
           </Box>
 
-          {/* Tasks At A Glance */}
-          <Box className="card-ems-static" sx={{ p: 3 }}>
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <CheckSquare size={18} className="text-indigo-600" /> My Tasks
-              </h3>
-              <button className="text-xs font-bold text-indigo-600 hover:underline" onClick={() => navigate('/my-tasks')}>View All</button>
-            </div>
-            <div className="flex flex-col gap-3">
-              {[
-                { title: "Implement Sidebar for Employee Hub", project: "EMS Pro", progress: 60, status: "In Progress" },
-                { title: "Fix Login authentication bug", project: "Security", progress: 100, status: "Done" },
-              ].map((task, i) => (
-                <div key={i} className="p-3 rounded-xl border border-slate-100 hover:border-indigo-100 transition-all cursor-pointer" onClick={() => navigate('/my-tasks')}>
-                  <div className="flex justify-between items-start mb-2">
-                    <p className="text-sm font-bold text-slate-900 leading-tight">{task.title}</p>
-                    <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded ${task.status === 'Done' ? 'bg-emerald-50 text-emerald-600' : 'bg-indigo-50 text-indigo-600'}`}>
-                      {task.status}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 h-1 bg-slate-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-indigo-500" style={{ width: `${task.progress}%` }}></div>
-                    </div>
-                    <span className="text-[10px] font-bold text-slate-400">{task.progress}%</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Box>
 
 
 

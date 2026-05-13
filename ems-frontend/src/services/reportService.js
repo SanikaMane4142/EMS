@@ -272,5 +272,24 @@ export const reportService = {
 
     if (error) throw error;
     return count || 0;
+  },
+
+  /**
+   * [EMPLOYEE] Get count of reports submitted this month.
+   */
+  async getMonthlyReportCount(userId) {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = today.getMonth() + 1;
+    const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+
+    const { count, error } = await supabase
+      .from('daily_reports')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .gte('report_date', startDate);
+
+    if (error) throw error;
+    return count || 0;
   }
 };

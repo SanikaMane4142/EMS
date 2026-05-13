@@ -166,11 +166,7 @@ const Employees = () => {
 
   return (
     <div className="animate-in fade-in duration-500">
-      <PageHeader title="Employees" subtitle={`${employees.length} total employees`}>
-        <button className="btn-ems btn-ems-primary" onClick={() => setShowAddDialog(true)}>
-          <Plus size={16} /> Add Employee
-        </button>
-      </PageHeader>
+      <PageHeader title="Employees" subtitle={`${employees.length} total employees`} />
 
       {/* Filters */}
       <Box className="card-ems-static" sx={{ p: 2, mb: 3 }}>
@@ -263,20 +259,6 @@ const Employees = () => {
               <input type="text" className="form-input-ems" 
                 value={editData.full_name || ''} 
                 onChange={(e) => setEditData({...editData, full_name: e.target.value})} 
-              />
-            </div>
-            <div>
-              <label className="text-sm font-semibold text-slate-700 block mb-1.5">Designation</label>
-              <input type="text" className="form-input-ems" 
-                value={editData.designation || ''} 
-                onChange={(e) => setEditData({...editData, designation: e.target.value})} 
-              />
-            </div>
-            <div>
-              <label className="text-sm font-semibold text-slate-700 block mb-1.5">Phone Number</label>
-              <input type="tel" className="form-input-ems" 
-                value={editData.phone || ''} 
-                onChange={(e) => setEditData({...editData, phone: e.target.value})} 
               />
             </div>
             <div className="grid grid-cols-2 gap-4">

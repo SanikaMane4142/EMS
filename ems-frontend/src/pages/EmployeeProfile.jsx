@@ -222,22 +222,6 @@ const EmployeeProfile = () => {
                 onChange={(e) => setEditData({...editData, full_name: e.target.value})}
               />
             </div>
-            <div>
-              <label className="text-sm font-semibold text-slate-700 block mb-1.5">Designation</label>
-              <input 
-                type="text" className="form-input-ems" 
-                value={editData.designation || ''} 
-                onChange={(e) => setEditData({...editData, designation: e.target.value})}
-              />
-            </div>
-            <div>
-              <label className="text-sm font-semibold text-slate-700 block mb-1.5">Phone Number</label>
-              <input 
-                type="text" className="form-input-ems" 
-                value={editData.phone || ''} 
-                onChange={(e) => setEditData({...editData, phone: e.target.value})}
-              />
-            </div>
             
             {/* JOINING DATE & JOINED AT - RESTRICTED TO HR/ADMIN */}
             {isHR ? (

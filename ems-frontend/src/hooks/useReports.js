@@ -31,6 +31,16 @@ export const useSubmitReport = () => {
     mutationFn: ({ userId, reportData }) => reportService.submitDailyReport(userId, reportData),
     onSuccess: (_, { userId }) => {
       queryClient.invalidateQueries({ queryKey: ['reports', 'today', userId] });
+      queryClient.invalidateQueries({ queryKey: ['reports', 'monthly', userId] });
     },
+  });
+};
+
+export const useMonthlyReportCount = (userId) => {
+  return useQuery({
+    queryKey: ['reports', 'monthly', userId],
+    queryFn: () => reportService.getMonthlyReportCount(userId),
+    enabled: !!userId,
+    staleTime: 60_000,
   });
 };
