@@ -69,7 +69,7 @@ const MyAttendance = () => {
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Filter:</span>
-            <select 
+            <select
               className="form-input-premium !w-40 !h-10 !text-xs !py-0 !bg-slate-50 border-none cursor-pointer hover:bg-slate-100 transition-colors"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}

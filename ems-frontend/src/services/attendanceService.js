@@ -86,7 +86,7 @@ export const attendanceService = {
     const diffMs = punchOutTime - new Date(punchInTime);
     const netMs = Math.max(0, diffMs - lunchDurationMs);
     let totalHours = parseFloat((netMs / (1000 * 60 * 60)).toFixed(2));
-    
+
     let status = 'punched_out';
 
     // Enforcement: Capped at 8 hours regular shift
@@ -275,7 +275,7 @@ export const attendanceService = {
       const dayData = attRes.data.filter(r => r.attendance_date === date);
       const presentCount = dayData.filter(r => ['punched_in', 'punched_out', 'auto_punched_out'].includes(r.status)).length;
       const percentage = Math.round((presentCount / totalEmployees) * 100);
-      
+
       return {
         date,
         label: new Date(date).toLocaleDateString([], { weekday: 'short' }),
@@ -285,13 +285,11 @@ export const attendanceService = {
   },
 
   /**
-   * [HR/ADMIN] Get formatted list of today's attendance with profiles
+   * [HR/ADMIN] Get formatted list of attendance with filters
    */
-  async getAttendanceOverview(dateStr = null) {
-    const today = dateStr || getTodayIST();
-
-    // 1. Get attendance records with profiles and departments joined
-    const { data: att, error: attErr } = await supabase
+  async getAttendanceOverview({ date = null, startDate = null, endDate = null, dept = 'all', empId = '' } = {}) {
+    // 1. Build Query
+    let query = supabase
       .from('attendance')
       .select(`
         *,
@@ -300,26 +298,57 @@ export const attendanceService = {
           full_name,
           email,
           designation,
+          employee_id,
           departments!profiles_department_id_fkey (name)
         )
-      `)
-      .eq('attendance_date', today);
+      `);
+
+    // Date Filtering
+    if (startDate && endDate) {
+      query = query.gte('attendance_date', startDate).lte('attendance_date', endDate);
+    } else {
+      const targetDate = date || getTodayIST();
+      query = query.eq('attendance_date', targetDate);
+    }
+
+    // Sort by date and then name
+    query = query.order('attendance_date', { ascending: false });
+
+    // 2. Execute Query
+    const { data: att, error: attErr } = await query;
 
     if (attErr) {
       console.error('[Attendance] Overview fetch error:', attErr.message);
       throw attErr;
     }
-    
+
     if (!att || att.length === 0) return [];
 
-    // 2. Format for DataTable
-    return att.map(item => {
+    // 3. Post-fetch filtering (Supabase doesn't easily filter on joined tables in one go without complex RPC)
+    let filtered = att;
+
+    if (dept !== 'all') {
+      filtered = filtered.filter(item => item.profiles?.departments?.name === dept);
+    }
+
+    if (empId) {
+      const search = empId.toLowerCase().trim();
+      filtered = filtered.filter(item =>
+        item.profiles?.employee_id?.toLowerCase().includes(search) ||
+        item.profiles?.full_name?.toLowerCase().includes(search)
+      );
+    }
+
+    // 4. Format for DataTable
+    return filtered.map(item => {
       const p = item.profiles || {};
       const lunchMin = item.lunch_duration_ms ? Math.round(item.lunch_duration_ms / 60000) : 0;
       return {
         id: item.id,
+        date: item.attendance_date,
         name: p.full_name || p.email || 'Unknown',
         email: p.email || '-',
+        empId: p.employee_id || '-',
         dept: p.departments?.name || p.designation || 'Staff',
         punchIn: item.punch_in_time ? new Date(item.punch_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-',
         punchOut: item.punch_out_time ? new Date(item.punch_out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-',

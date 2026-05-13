@@ -14,7 +14,7 @@ import { leaveService } from '../services/leaveService';
 const EmployeeProfile = () => {
   const navigate = useNavigate();
   const { id } = useParams();
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, profile: currentProfile } = useAuth();
   const [activeTab, setActiveTab] = useState(0);
   const [employee, setEmployee] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -23,7 +23,7 @@ const EmployeeProfile = () => {
   const [attendanceHistory, setAttendanceHistory] = useState([]);
   const [leaveHistory, setLeaveHistory] = useState([]);
 
-  const isHR = ['hr', 'admin', 'super_admin'].includes(currentUser?.role);
+  const isHR = ['hr', 'admin', 'super_admin'].includes(currentProfile?.role);
 
   const fetchData = async () => {
     try {
@@ -78,7 +78,8 @@ const EmployeeProfile = () => {
               {[
                 { icon: Briefcase, label: 'Department', value: employee.departments?.name || 'Unassigned' },
                 { icon: Mail, label: 'Email', value: employee.email },
-                { icon: Calendar, label: 'Join Date', value: employee.joined_at ? new Date(employee.joined_at).toLocaleDateString() : 'N/A' },
+                { icon: Calendar, label: 'Official Joining', value: employee.joining_date ? new Date(employee.joining_date).toLocaleDateString() : 'N/A' },
+                { icon: Clock, label: 'Portal Joined', value: employee.joined_at ? new Date(employee.joined_at).toLocaleDateString() : 'N/A' },
               ].map((item, i) => (
                 <div key={i} className="p-3 rounded-2xl bg-slate-50 border border-slate-100 flex items-center gap-3">
                   <item.icon size={16} className="text-indigo-600" />
@@ -238,22 +239,40 @@ const EmployeeProfile = () => {
               />
             </div>
             
-            {/* JOINING DATE - RESTRICTED TO HR/ADMIN */}
+            {/* JOINING DATE & JOINED AT - RESTRICTED TO HR/ADMIN */}
             {isHR ? (
-              <div>
-                <label className="text-sm font-semibold text-slate-700 block mb-1.5 flex items-center gap-2">
-                  Joining Date <span className="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded uppercase tracking-wider">HR ONLY</span>
-                </label>
-                <input 
-                  type="date" className="form-input-ems" 
-                  value={editData.joined_at || ''} 
-                  onChange={(e) => setEditData({...editData, joined_at: e.target.value})}
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-semibold text-slate-700 block mb-1.5 flex items-center gap-2">
+                    Official Joining <span className="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded uppercase tracking-wider">HR</span>
+                  </label>
+                  <input 
+                    type="date" className="form-input-ems" 
+                    value={editData.joining_date || ''} 
+                    onChange={(e) => setEditData({...editData, joining_date: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-semibold text-slate-700 block mb-1.5 flex items-center gap-2">
+                    Portal Joined <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded uppercase tracking-wider">HR</span>
+                  </label>
+                  <input 
+                    type="date" className="form-input-ems" 
+                    value={editData.joined_at || ''} 
+                    onChange={(e) => setEditData({...editData, joined_at: e.target.value})}
+                  />
+                </div>
               </div>
             ) : (
-              <div className="p-3 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Joining Date</p>
-                <p className="text-xs text-slate-500 italic">Only HR can modify this field.</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-3 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Official Joining</p>
+                  <p className="text-xs text-slate-500 italic">HR Only</p>
+                </div>
+                <div className="p-3 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Portal Joined</p>
+                  <p className="text-xs text-slate-500 italic">HR Only</p>
+                </div>
               </div>
             )}
           </div>
@@ -263,11 +282,11 @@ const EmployeeProfile = () => {
           <button className="btn-ems btn-ems-primary" onClick={async () => {
             try {
               setLoading(true);
-              const { departments, ...cleanData } = editData; // Remove joined relation
+              const { departments, id: _, ...cleanData } = editData;
               await profileService.updateProfile(id, cleanData);
               Swal.fire('Success', 'Profile updated successfully!', 'success');
               setShowEdit(false);
-              fetchData();
+              await fetchData();
             } catch (err) {
               Swal.fire('Error', err.message, 'error');
             } finally {

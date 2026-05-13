@@ -466,6 +466,7 @@ CREATE POLICY "profiles_read_active" ON public.profiles FOR SELECT TO authentica
 CREATE POLICY "profiles_self_view"       ON public.profiles FOR SELECT TO authenticated USING (auth.uid() = id);
 CREATE POLICY "profiles_management_view" ON public.profiles FOR SELECT TO authenticated USING (get_my_role() IN ('hr', 'admin', 'super_admin'));
 CREATE POLICY "profiles_self_update"     ON public.profiles FOR UPDATE TO authenticated USING (auth.uid() = id);
+CREATE POLICY "profiles_hr_update"       ON public.profiles FOR UPDATE TO authenticated USING (get_my_role() IN ('hr', 'admin', 'super_admin'));
 CREATE POLICY "profiles_super_admin_all" ON public.profiles FOR ALL    TO authenticated USING (get_my_role() = 'super_admin');
 
 

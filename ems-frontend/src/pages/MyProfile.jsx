@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Box, Avatar } from '@mui/material';
-import { Mail, Phone, MapPin, Calendar, Briefcase, Save } from 'lucide-react';
+import { Mail, Phone, MapPin, Calendar, Clock, Briefcase, Save } from 'lucide-react';
 import RoleBadge from '../components/RoleBadge';
 import PageHeader from '../components/PageHeader';
 import { profileService } from '../services/profileService';
@@ -67,7 +67,11 @@ const MyProfile = () => {
             </div>
             <div className="flex items-center gap-3 text-sm">
               <Calendar size={16} className="text-slate-400" />
-              <span className="text-slate-600">Joined {joinDate}</span>
+              <span className="text-slate-600">Joined Company: {profile?.joining_date ? new Date(profile.joining_date).toLocaleDateString() : 'N/A'}</span>
+            </div>
+            <div className="flex items-center gap-3 text-sm">
+              <Clock size={16} className="text-slate-400" />
+              <span className="text-slate-600">Portal Access: {profile?.joined_at ? new Date(profile.joined_at).toLocaleDateString() : 'N/A'}</span>
             </div>
           </div>
         </Box>

@@ -70,17 +70,21 @@ export const AuthProvider = ({ children }) => {
   };
 
   useEffect(() => {
+    let isMounted = true;
+
     const initializeAuth = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          setUser(session.user);
-          await verifyAndFetchProfile(session.user.id);
+        if (isMounted) {
+          if (session) {
+            setUser(session.user);
+            await verifyAndFetchProfile(session.user.id);
+          }
         }
       } catch (err) {
         console.error('Auth initialization failed:', err);
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     };
 
@@ -88,7 +92,11 @@ export const AuthProvider = ({ children }) => {
 
     const { data: authListener } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        if (event === 'SIGNED_OUT') {
+        if (!isMounted) return;
+
+        console.log('[Auth] State Change:', event);
+
+        if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
           queryClient.clear();
           setUser(null);
           setProfile(null);
@@ -96,18 +104,25 @@ export const AuthProvider = ({ children }) => {
           return;
         }
 
-        if (session) {
-          setUser(session.user);
-          if (!profile) await verifyAndFetchProfile(session.user.id);
-        } else {
-          setUser(null);
-          setProfile(null);
+        try {
+          if (session) {
+            setUser(session.user);
+            // Note: verifyAndFetchProfile handles internal error state
+            await verifyAndFetchProfile(session.user.id);
+          } else {
+            setUser(null);
+            setProfile(null);
+          }
+        } catch (err) {
+          console.error('Auth listener processing error:', err);
+        } finally {
+          if (isMounted) setLoading(false);
         }
-        setLoading(false);
       }
     );
 
     return () => {
+      isMounted = false;
       authListener?.subscription.unsubscribe();
     };
   }, []);

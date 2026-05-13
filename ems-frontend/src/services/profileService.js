@@ -47,32 +47,34 @@ export const profileService = {
    * Includes a fallback to handle missing columns (like 'birthday') gracefully.
    */
   async updateProfile(id, profileData) {
+    // Clean up data: convert empty strings to null for date fields
+    const cleanedData = { ...profileData };
+    if (cleanedData.joining_date === '') cleanedData.joining_date = null;
+    if (cleanedData.joined_at === '') cleanedData.joined_at = null;
+    if (cleanedData.birthday === '') cleanedData.birthday = null;
+
     const { data, error } = await supabase
       .from('profiles')
-      .update(profileData)
+      .update(cleanedData)
       .eq('id', id)
       .select()
       .maybeSingle();
 
-    if (error && error.code === 'PGRST204') {
-      // Column missing error - try to filter out problematic columns and retry
-      console.warn('[profileService] Some columns are missing in the database. Retrying with basic fields...');
+    if (error) {
+      console.error('[profileService] updateProfile failed:', error);
       
-      const { full_name, phone, ...rest } = profileData;
-      const safeData = { full_name, phone };
+      // If it's a "column does not exist" error (42703), provide a helpful message
+      if (error.code === '42703') {
+        throw new Error(`Database schema mismatch: ${error.message}. Please ensure joining_date and joined_at columns exist.`);
+      }
       
-      const { data: retryData, error: retryError } = await supabase
-        .from('profiles')
-        .update(safeData)
-        .eq('id', id)
-        .select()
-        .maybeSingle();
-        
-      if (retryError) throw retryError;
-      return retryData;
+      throw error;
     }
 
-    if (error) throw error;
+    if (!data) {
+      throw new Error('No profile found to update or permission denied.');
+    }
+
     return data;
   },
 
@@ -181,7 +183,7 @@ export const profileService = {
       // Try with joined_at first
       let { data, error } = await supabase
         .from('profiles')
-        .select('id, full_name, email, designation, joined_at, created_at, departments!profiles_department_id_fkey(name)')
+        .select('id, full_name, email, designation, joined_at, joining_date, created_at, departments!profiles_department_id_fkey(name)')
         .order('created_at', { ascending: false })
         .limit(limit);
 

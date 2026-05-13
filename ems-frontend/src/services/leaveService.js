@@ -262,6 +262,31 @@ export const leaveService = {
   },
 
   /**
+   * Manually set leave balances for a specific user
+   */
+  async updateCustomBalances(userId, balances) {
+    const year = new Date().getFullYear();
+    const { data, error } = await supabase
+      .from('leave_balances')
+      .upsert(
+        { 
+          user_id: userId, 
+          year, 
+          cl_total: balances.cl_total, 
+          sl_total: balances.sl_total, 
+          ol_total: balances.ol_total,
+          updated_at: new Date().toISOString()
+        },
+        { onConflict: 'user_id, year' }
+      )
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  /**
    * Calculate duration with Sandwich Logic (Monday is weekly off)
    */
   async calculateLeaveDays(startDate, endDate) {

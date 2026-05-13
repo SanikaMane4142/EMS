@@ -89,8 +89,7 @@ const EmployeeDashboard = () => {
     auto_filled_completed_tasks: [],
     work_in_progress: '',
     tomorrow_plan: '',
-    total_working_hours: 8,
-    productivity_rating: 5,
+    blockers: '',
     additional_notes: ''
   });
   const [reportSubmitted, setReportSubmitted] = useState(false);
@@ -683,26 +682,14 @@ const EmployeeDashboard = () => {
                   </div>
                 </div>
 
-                {/* Metrics Row */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-7 mb-7">
-                  <div>
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-2.5">Total Working Hours</label>
-                    <input
-                      type="number" name="total_working_hours" className="form-input-premium"
-                      min="0" max="24" step="0.5" value={reportData.total_working_hours} onChange={handleReportChange} required
-                      style={{ height: '52px' }}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-2.5">Productivity Rating (1-10)</label>
-                    <select
-                      name="productivity_rating" className="form-input-premium"
-                      value={reportData.productivity_rating} onChange={handleReportChange}
-                      style={{ height: '52px' }}
-                    >
-                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => <option key={n} value={n}>{n} - {n <= 3 ? 'Low' : n <= 7 ? 'Good' : 'Excellent'}</option>)}
-                    </select>
-                  </div>
+
+                {/* Blockers */}
+                <div className="mb-7">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-2.5">Blockers</label>
+                  <textarea
+                    name="blockers" className="form-input-premium" placeholder="Any blockers or challenges faced..."
+                    value={reportData.blockers} onChange={handleReportChange} style={{ resize: 'none', minHeight: '110px' }}
+                  />
                 </div>
 
                 {/* Notes */}

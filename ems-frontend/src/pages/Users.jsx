@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Box, Avatar, Dialog, DialogTitle, DialogContent, DialogActions, IconButton } from '@mui/material';
-import { Shield, Plus, Edit, Trash2, X, Search, User as UserIcon, Mail, Lock, Building, Eye, EyeOff } from 'lucide-react';
+import { Shield, Plus, Edit, Trash2, X, Search, User as UserIcon, Mail, Lock, Building, Eye, EyeOff, Calendar, Save } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import Swal from 'sweetalert2';
@@ -30,6 +30,8 @@ const UsersPage = () => {
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [editData, setEditData] = useState({});
 
   const fetchData = async () => {
     try {
@@ -94,6 +96,34 @@ const UsersPage = () => {
         }
       }
     });
+  };
+
+  const handleEditUser = (user) => {
+    setEditData({
+      id: user.id,
+      full_name: user.full_name || '',
+      designation: user.designation || '',
+      phone: user.phone || '',
+      joining_date: user.joining_date || '',
+      joined_at: user.joined_at || '',
+    });
+    setShowEditDialog(true);
+  };
+
+  const handleSaveEdit = async () => {
+    try {
+      setLoading(true);
+      const { id, ...updateData } = editData;
+      await profileService.updateProfile(id, updateData);
+      toast.success('Profile updated successfully!');
+      setShowEditDialog(false);
+      await fetchData();
+    } catch (err) {
+      console.error(err);
+      toast.error('Update failed: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCreateUser = async () => {
@@ -222,7 +252,7 @@ const UsersPage = () => {
                       <button className="btn-icon-ems" style={{ width: 32, height: 32 }} aria-label={`View ${u.full_name}`} onClick={() => navigate(`/employee/${u.id}`)}>
                         <Eye size={14} />
                       </button>
-                      <button className="btn-icon-ems" style={{ width: 32, height: 32 }} aria-label={`Edit ${u.full_name}`}>
+                      <button className="btn-icon-ems" style={{ width: 32, height: 32 }} aria-label={`Edit ${u.full_name}`} onClick={() => handleEditUser(u)}>
                         <Edit size={14} />
                       </button>
                       <button className="btn-icon-ems" style={{ width: 32, height: 32, color: (u.role === 'super_admin' || u.id === currentUser.id) ? '#cbd5e1' : '#ef4444' }}
@@ -331,6 +361,66 @@ const UsersPage = () => {
           <button className="btn-ems btn-ems-secondary" onClick={() => setShowDialog(false)} disabled={loading}>Cancel</button>
           <button className="btn-ems btn-ems-primary" onClick={handleCreateUser} disabled={loading}>
             {loading ? 'Creating...' : 'Create User'}
+          </button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit User Dialog */}
+      <Dialog open={showEditDialog} onClose={() => setShowEditDialog(false)} maxWidth="sm" fullWidth
+        slotProps={{ paper: { sx: { borderRadius: '16px', p: 1 } } }}>
+        <DialogTitle sx={{ fontWeight: 700, fontFamily: 'Inter', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          Edit Employee
+          <IconButton onClick={() => setShowEditDialog(false)} size="small"><X size={18} /></IconButton>
+        </DialogTitle>
+        <DialogContent>
+          <div className="flex flex-col gap-4 pt-2">
+            <div>
+              <label className="text-sm font-semibold text-slate-700 block mb-1.5">Full Name</label>
+              <input type="text" className="form-input-ems" 
+                value={editData.full_name || ''} 
+                onChange={(e) => setEditData({...editData, full_name: e.target.value})} 
+              />
+            </div>
+            <div>
+              <label className="text-sm font-semibold text-slate-700 block mb-1.5">Designation</label>
+              <input type="text" className="form-input-ems" 
+                value={editData.designation || ''} 
+                onChange={(e) => setEditData({...editData, designation: e.target.value})} 
+              />
+            </div>
+            <div>
+              <label className="text-sm font-semibold text-slate-700 block mb-1.5">Phone Number</label>
+              <input type="tel" className="form-input-ems" 
+                value={editData.phone || ''} 
+                onChange={(e) => setEditData({...editData, phone: e.target.value})} 
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-semibold text-slate-700 block mb-1.5 flex items-center gap-2">
+                  <Calendar size={14} /> Official Joining
+                </label>
+                <input type="date" className="form-input-ems" 
+                  value={editData.joining_date || ''} 
+                  onChange={(e) => setEditData({...editData, joining_date: e.target.value})} 
+                />
+              </div>
+              <div>
+                <label className="text-sm font-semibold text-slate-700 block mb-1.5 flex items-center gap-2">
+                  <Calendar size={14} /> Portal Joined
+                </label>
+                <input type="date" className="form-input-ems" 
+                  value={editData.joined_at || ''} 
+                  onChange={(e) => setEditData({...editData, joined_at: e.target.value})} 
+                />
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2.5 }}>
+          <button className="btn-ems btn-ems-secondary" onClick={() => setShowEditDialog(false)} disabled={loading}>Cancel</button>
+          <button className="btn-ems btn-ems-primary" onClick={handleSaveEdit} disabled={loading}>
+            <Save size={16} /> {loading ? 'Saving...' : 'Save Changes'}
           </button>
         </DialogActions>
       </Dialog>

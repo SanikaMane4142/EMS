@@ -24,10 +24,11 @@ export const useTodayStats = () => {
   });
 };
 
-export const useAttendanceOverview = (dateStr) => {
+export const useAttendanceOverview = (filters) => {
+  const filterKey = typeof filters === 'string' ? filters : JSON.stringify(filters);
   return useQuery({
-    queryKey: ['attendance', 'overview', dateStr],
-    queryFn: () => attendanceService.getAttendanceOverview(dateStr),
+    queryKey: ['attendance', 'overview', filterKey],
+    queryFn: () => attendanceService.getAttendanceOverview(typeof filters === 'string' ? { date: filters } : filters),
   });
 };
 

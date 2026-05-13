@@ -94,5 +94,20 @@ export const employeeService = {
       }
       return false;
     });
+  },
+
+  /**
+   * Get employee by their Employee ID (string)
+   */
+  async getByEmployeeId(empId) {
+    if (!empId) return null;
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, full_name, email, designation, employee_id, role, departments!profiles_department_id_fkey(name)')
+      .eq('employee_id', empId.trim())
+      .maybeSingle();
+
+    if (error) throw error;
+    return data;
   }
 };

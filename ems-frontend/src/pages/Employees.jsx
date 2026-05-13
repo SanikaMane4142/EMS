@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Box, Avatar, Dialog, DialogTitle, DialogContent, DialogActions, IconButton, Chip } from '@mui/material';
-import { Search, Plus, X, Edit, Trash2, Eye } from 'lucide-react';
+import { Search, Plus, X, Edit, Trash2, Eye, Calendar, Save } from 'lucide-react';
+import { profileService } from '../services/profileService';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import Swal from 'sweetalert2';
@@ -8,12 +9,17 @@ import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
 import { useEmployees, useDeleteEmployee } from '../hooks/useEmployees';
 import { useDepartments } from '../hooks/useDepartments';
+import { useQueryClient } from '@tanstack/react-query';
 
 const Employees = () => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('all');
   const [showAddDialog, setShowAddDialog] = useState(false);
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [editData, setEditData] = useState({});
+  const [saving, setSaving] = useState(false);
 
   const { data: employees = [], isLoading: loadingEmployees } = useEmployees();
   const { data: departments = [] } = useDepartments();
@@ -44,6 +50,34 @@ const Employees = () => {
         }
       }
     });
+  };
+
+  const handleEdit = (emp) => {
+    setEditData({
+      id: emp.id,
+      full_name: emp.full_name || '',
+      designation: emp.designation || '',
+      phone: emp.phone || '',
+      joining_date: emp.joining_date || '',
+      joined_at: emp.joined_at || '',
+    });
+    setShowEditDialog(true);
+  };
+
+  const handleSaveEdit = async () => {
+    try {
+      setSaving(true);
+      const { id, ...updateData } = editData;
+      await profileService.updateProfile(id, updateData);
+      toast.success('Employee updated successfully!');
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
+      setShowEditDialog(false);
+    } catch (err) {
+      console.error(err);
+      toast.error('Update failed: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const columns = [
@@ -118,7 +152,7 @@ const Employees = () => {
             <button className="btn-icon-ems" style={{ width: 32, height: 32 }} aria-label={`View ${name}`} onClick={() => navigate(`/employee/${emp.id}`)}>
               <Eye size={14} />
             </button>
-            <button className="btn-icon-ems" style={{ width: 32, height: 32 }} aria-label={`Edit ${name}`}>
+            <button className="btn-icon-ems" style={{ width: 32, height: 32 }} aria-label={`Edit ${name}`} onClick={() => handleEdit(emp)}>
               <Edit size={14} />
             </button>
             <button className="btn-icon-ems" style={{ width: 32, height: 32, color: '#ef4444' }} aria-label={`Delete ${name}`} onClick={() => handleDelete(emp)}>
@@ -212,6 +246,66 @@ const Employees = () => {
             setShowAddDialog(false);
             Swal.fire({ title: 'Employee Added!', text: 'User must sign up with this email.', icon: 'success' });
           }}>Add Employee</button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit Employee Dialog */}
+      <Dialog open={showEditDialog} onClose={() => setShowEditDialog(false)} maxWidth="sm" fullWidth
+        slotProps={{ paper: { sx: { borderRadius: '16px', p: 1 } } }}>
+        <DialogTitle sx={{ fontWeight: 700, fontFamily: 'Inter', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          Edit Employee
+          <IconButton onClick={() => setShowEditDialog(false)} size="small"><X size={18} /></IconButton>
+        </DialogTitle>
+        <DialogContent>
+          <div className="flex flex-col gap-4 pt-2">
+            <div>
+              <label className="text-sm font-semibold text-slate-700 block mb-1.5">Full Name</label>
+              <input type="text" className="form-input-ems" 
+                value={editData.full_name || ''} 
+                onChange={(e) => setEditData({...editData, full_name: e.target.value})} 
+              />
+            </div>
+            <div>
+              <label className="text-sm font-semibold text-slate-700 block mb-1.5">Designation</label>
+              <input type="text" className="form-input-ems" 
+                value={editData.designation || ''} 
+                onChange={(e) => setEditData({...editData, designation: e.target.value})} 
+              />
+            </div>
+            <div>
+              <label className="text-sm font-semibold text-slate-700 block mb-1.5">Phone Number</label>
+              <input type="tel" className="form-input-ems" 
+                value={editData.phone || ''} 
+                onChange={(e) => setEditData({...editData, phone: e.target.value})} 
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-semibold text-slate-700 block mb-1.5 flex items-center gap-2">
+                  <Calendar size={14} /> Official Joining
+                </label>
+                <input type="date" className="form-input-ems" 
+                  value={editData.joining_date || ''} 
+                  onChange={(e) => setEditData({...editData, joining_date: e.target.value})} 
+                />
+              </div>
+              <div>
+                <label className="text-sm font-semibold text-slate-700 block mb-1.5 flex items-center gap-2">
+                  <Calendar size={14} /> Portal Joined
+                </label>
+                <input type="date" className="form-input-ems" 
+                  value={editData.joined_at || ''} 
+                  onChange={(e) => setEditData({...editData, joined_at: e.target.value})} 
+                />
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2.5 }}>
+          <button className="btn-ems btn-ems-secondary" onClick={() => setShowEditDialog(false)} disabled={saving}>Cancel</button>
+          <button className="btn-ems btn-ems-primary" onClick={handleSaveEdit} disabled={saving}>
+            <Save size={16} /> {saving ? 'Saving...' : 'Save Changes'}
+          </button>
         </DialogActions>
       </Dialog>
     </div>
