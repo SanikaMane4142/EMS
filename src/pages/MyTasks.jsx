@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Search, Plus, MoreVertical, Calendar,
   ChevronRight, Share2, GripVertical,
   CheckCircle, Briefcase, ChevronUp, ChevronDown as ChevronDownIcon, Layout,
   Check, PlayCircle, AlertCircle, SendHorizonal, ThumbsUp, MessageCircle,
   CornerUpLeft, CheckCircle2, History, Zap, LayoutGrid, List, AlignLeft, Columns,
-  Filter, Layers, Clock
+  Filter, Layers, Clock, Trash2, Pencil
 } from "lucide-react";
 import { Box, Avatar, IconButton, Collapse, Menu, MenuItem, CircularProgress, Skeleton, Dialog } from '@mui/material';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -30,11 +31,13 @@ import {
   useSubmitForReview, useMarkAsDone, useAddGroup, useAddSubtask,
   useUpdateTaskOrder, useUpdateGroupOrder, useUpdateSubtaskOrder,
   useUpdateTask, useTaskComments, useAddComment, useToggleCommentResolution,
-  useMarkChangesDone
+  useMarkChangesDone, useDeleteTask, useSoftDeleteGroup, useSoftDeleteSubtask,
+  useUpdateGroup, useUpdateSubtask
 } from '../hooks/useTasks';
 import { taskService } from '../services/taskService';
 import { notificationService } from '../services/notificationService';
 import { normalizeTask, TASK_STATUS_STYLES } from '../utils/taskUtils';
+import { supabase } from "../lib/supabaseClient";
 
 /** Priority Badge Component */
 
@@ -121,7 +124,7 @@ const SortableTaskItem = ({ task, isActive, onClick }) => {
   );
 };
 
-const SortableSubtaskItem = ({ item, onToggle, canEdit = true }) => {
+const SortableSubtaskItem = ({ item, onToggle, canEdit = true, onDelete }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id, disabled: !canEdit });
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -146,21 +149,29 @@ const SortableSubtaskItem = ({ item, onToggle, canEdit = true }) => {
         </div>
       )}
 
-      <span className={`text-[12px] font-medium flex-1 tracking-tight transition-colors ${item.isCompleted ? 'text-emerald-700' : 'text-slate-700'
-        }`}>
-        {item.title}
-      </span>
+      <div className="flex-1 flex flex-col justify-center min-w-0">
+        <span className={`text-[11px] font-bold truncate transition-all duration-300 ${item.isCompleted ? 'text-emerald-700/60 line-through' : 'text-slate-700'
+          }`}>
+          {item.title}
+        </span>
+      </div>
 
       <div className="flex items-center justify-end gap-6">
-        <div className="flex items-center gap-1 text-[10px] font-bold text-slate-300 w-[80px]">
-          <Calendar size={10} /> {item.date}
-        </div>
-
-        <div className="w-[80px]">
-          {item.isCompleted && item.updatedTime && (
-            <div className="flex items-center gap-1 text-[10px] font-black text-indigo-400">
-              <History size={11} /> {item.updatedTime}
+        <div className="flex items-center justify-end gap-2 w-[160px]">
+          {item.date && item.date !== '-' && (
+            <div className="flex items-center gap-1.5 text-[8px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">
+              <Clock size={10} />
+              {item.updatedTime ? item.updatedTime : item.date}
             </div>
+          )}
+          {canEdit && onDelete && (
+            <IconButton
+              size="small"
+              onClick={(e) => { e.stopPropagation(); onDelete(item); }}
+              className="w-6 h-6 rounded text-slate-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover/item:opacity-100 transition-all"
+            >
+              <Trash2 size={13} />
+            </IconButton>
           )}
         </div>
 
@@ -176,20 +187,12 @@ const SortableSubtaskItem = ({ item, onToggle, canEdit = true }) => {
             <Check size={11} strokeWidth={3} className={`transition-transform duration-300 ${item.isCompleted ? 'scale-100' : 'scale-0'}`} />
           </button>
         </div>
-
-        <div className="w-[28px]">
-          {canEdit && (
-            <IconButton size="small" className="opacity-0 group-hover/item:opacity-100 transition-opacity p-0.5">
-              <MoreVertical size={14} className="text-slate-300" />
-            </IconButton>
-          )}
-        </div>
       </div>
     </div>
   );
 };
 
-const SortableGroup = ({ group, index, expanded, onToggle, onAddItem, isLast, onToggleGroup, canEdit = true }) => {
+const SortableGroup = ({ group, index, expanded, onToggle, onAddItem, isLast, onToggleGroup, canEdit = true, onDeleteGroup, onDeleteSubtask }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: group.id, disabled: !canEdit });
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -220,8 +223,8 @@ const SortableGroup = ({ group, index, expanded, onToggle, onAddItem, isLast, on
             <h4 className="text-[12px] font-bold text-slate-900 tracking-tight">{group.title}</h4>
           </div>
 
-          <div className="flex items-center justify-end">
-            <div className="flex items-center gap-1 mr-4">
+          <div className="flex items-center justify-end gap-6">
+            <div className="flex items-center justify-end gap-1 w-[160px]">
               <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md border ${group.items.length > 0 && group.items.every(i => i.isCompleted) ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>
                 {group.items.filter(i => i.isCompleted).length}/{group.items.length} DONE
               </span>
@@ -232,6 +235,24 @@ const SortableGroup = ({ group, index, expanded, onToggle, onAddItem, isLast, on
                   className="w-6 h-6 rounded text-slate-400 hover:text-primary hover:bg-primary/5 transition-all"
                 >
                   <Plus size={14} />
+                </IconButton>
+              )}
+              {canEdit && group.onEdit && (
+                <IconButton
+                  size="small"
+                  onClick={(e) => { e.stopPropagation(); group.onEdit(group); }}
+                  className="w-6 h-6 rounded text-slate-300 hover:text-indigo-500 hover:bg-indigo-50 opacity-0 group-hover/header:opacity-100 transition-all"
+                >
+                  <Pencil size={13} />
+                </IconButton>
+              )}
+              {canEdit && onDeleteGroup && (
+                <IconButton
+                  size="small"
+                  onClick={(e) => { e.stopPropagation(); onDeleteGroup(group); }}
+                  className="w-6 h-6 rounded text-slate-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover/header:opacity-100 transition-all"
+                >
+                  <Trash2 size={13} />
                 </IconButton>
               )}
             </div>
@@ -272,7 +293,7 @@ const SortableGroup = ({ group, index, expanded, onToggle, onAddItem, isLast, on
         <div className="bg-white pl-8">
           <SortableContext items={group.items.map(i => i.id)} strategy={verticalListSortingStrategy}>
             {group.items.map(item => (
-              <SortableSubtaskItem key={item.id} item={item} onToggle={(id) => onToggleGroup(group.id, id)} canEdit={canEdit} />
+              <SortableSubtaskItem key={item.id} item={item} onToggle={(id) => onToggleGroup(group.id, id)} canEdit={canEdit} onDelete={canEdit && onDeleteSubtask ? (itm) => onDeleteSubtask(itm) : undefined} />
             ))}
           </SortableContext>
         </div>
@@ -291,6 +312,7 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
   const [switcherAnchor, setSwitcherAnchor] = useState(null);
   const [isAddGroupModalOpen, setAddGroupModalOpen] = useState(false);
   const [addingToGroupId, setAddingToGroupId] = useState(null);
+  const [editItemData, setEditItemData] = useState(null);
 
   // Real mutations
   const toggleSubtask = useToggleSubtask();
@@ -304,6 +326,10 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
   const markChangesDoneMutation = useMarkChangesDone();
   const submitForReviewMutation = useSubmitForReview();
   const markAsDoneMutation = useMarkAsDone();
+  const softDeleteGroupMutation = useSoftDeleteGroup();
+  const softDeleteSubtaskMutation = useSoftDeleteSubtask();
+  const updateGroupMutation = useUpdateGroup();
+  const updateSubtaskMutation = useUpdateSubtask();
 
   const [statusAnchor, setStatusAnchor] = useState(null);
   const [reviewModal, setReviewModal] = useState({ open: false, type: 'approve' }); // type: 'approve' | 'request_changes'
@@ -316,11 +342,11 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
   // Derived state for workflow buttons
   const isAssignee = activeTask.assigned_to === currentUserId;
   const isAssigner = activeTask.assigned_by === currentUserId;
-  const canEdit = isAssignee || (isAssigner && !activeTask.is_acknowledged);
+  const canEdit = (isAssignee || (isAssigner && !activeTask.is_acknowledged)) && activeTask.status !== 'done';
   const allDone = taskService.allSubtasksDone(taskGroups);
-  
+
   // Workflow Logic: Check if there are any unresolved "Changes Requested" comments
-  const unresolvedChanges = comments.some(c => 
+  const unresolvedChanges = comments.some(c =>
     c.message.includes('Changes Requested') && !c.is_resolved
   );
 
@@ -329,6 +355,17 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
   const canRequestChanges = isAssigner && activeTask.status === 'review';
 
   const handleCreateGroupOrItem = async (data) => {
+    if (data.isEdit) {
+      if (editItemData.type === 'group') {
+        await updateGroupMutation.mutateAsync({ groupId: data.id, title: data.name, description: data.description });
+      } else {
+        await updateSubtaskMutation.mutateAsync({ subtaskId: data.id, title: data.name, dueDate: data.dueDate, description: data.description });
+      }
+      setAddGroupModalOpen(false);
+      setEditItemData(null);
+      return;
+    }
+
     if (addingToGroupId) {
       // Add real subtask to DB
       await addSubtaskMutation.mutateAsync({
@@ -342,6 +379,76 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
       // Add real group to DB
       await addGroupMutation.mutateAsync({ taskId: activeTask.id, title: data.name });
       setAddGroupModalOpen(false);
+    }
+  };
+
+  // --- Soft Delete Handlers ---
+  const handleDeleteGroup = async (group) => {
+    const { default: Swal } = await import('sweetalert2');
+    // Check if any subtask is completed
+    const hasCompletedSubtask = group.items.some(i => i.isCompleted);
+    if (hasCompletedSubtask) {
+      Swal.fire({
+        title: 'Cannot Delete',
+        text: 'Cannot delete this task because one or more mini tasks are already completed.',
+        icon: 'warning',
+        confirmButtonColor: '#4F46E5',
+        customClass: { popup: 'rounded-[24px]', confirmButton: 'rounded-xl px-6 py-2 text-xs font-black uppercase tracking-widest' }
+      });
+      return;
+    }
+    const result = await Swal.fire({
+      title: 'Delete Task Group?',
+      text: `Are you sure you want to delete "${group.title}" and all its subtasks?`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#EF4444',
+      confirmButtonText: 'Yes, delete it',
+      customClass: { popup: 'rounded-[24px]', confirmButton: 'rounded-xl px-6 py-2 text-xs font-black uppercase tracking-widest', cancelButton: 'rounded-xl px-6 py-2 text-xs font-black uppercase tracking-widest' }
+    });
+    if (result.isConfirmed) {
+      try {
+        await softDeleteGroupMutation.mutateAsync(group.id);
+        // Optimistic: remove from local state
+        setTaskGroups(prev => prev.filter(g => g.id !== group.id));
+      } catch (err) {
+        Swal.fire('Error', err.message || 'Failed to delete group', 'error');
+      }
+    }
+  };
+
+  const handleDeleteSubtask = async (item) => {
+    const { default: Swal } = await import('sweetalert2');
+    if (item.isCompleted) {
+      Swal.fire({
+        title: 'Cannot Delete',
+        text: 'Completed mini tasks cannot be deleted.',
+        icon: 'warning',
+        confirmButtonColor: '#4F46E5',
+        customClass: { popup: 'rounded-[24px]', confirmButton: 'rounded-xl px-6 py-2 text-xs font-black uppercase tracking-widest' }
+      });
+      return;
+    }
+    const result = await Swal.fire({
+      title: 'Delete Mini Task?',
+      text: `Are you sure you want to delete "${item.title}"?`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#EF4444',
+      confirmButtonText: 'Yes, delete it',
+      customClass: { popup: 'rounded-[24px]', confirmButton: 'rounded-xl px-6 py-2 text-xs font-black uppercase tracking-widest', cancelButton: 'rounded-xl px-6 py-2 text-xs font-black uppercase tracking-widest' }
+    });
+    if (result.isConfirmed) {
+      try {
+        await softDeleteSubtaskMutation.mutateAsync(item.id);
+        // Optimistic: remove from local state
+        setTaskGroups(prev => prev.map(g => ({
+          ...g,
+          items: g.items.filter(i => i.id !== item.id)
+        })));
+      } catch (err) {
+        Swal.fire('Error', err.message || 'Failed to delete subtask', 'error');
+      }
     }
   };
 
@@ -377,18 +484,18 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
       // Optimistic update
       setTaskGroups(prev => prev.map(g =>
         g.id === groupId
-          ? { 
-              ...g, 
-              isCompleted: shouldAutoUntickGroup ? false : g.isCompleted,
-              items: g.items.map(i => i.id === subtaskId ? { ...i, isCompleted: willBeCompleted } : i) 
-            }
+          ? {
+            ...g,
+            isCompleted: shouldAutoUntickGroup ? false : g.isCompleted,
+            items: g.items.map(i => i.id === subtaskId ? { ...i, isCompleted: willBeCompleted } : i)
+          }
           : g
       ));
 
       // Persist subtask status
       try {
         await toggleSubtask.mutateAsync({ subtaskId, isCompleted: willBeCompleted });
-        
+
         // If we auto-unticked the group, persist that too and update task progress
         if (shouldAutoUntickGroup) {
           await toggleGroupMutation.mutateAsync({ groupId, isCompleted: false });
@@ -460,12 +567,15 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
     if (tasks.some(t => t.id === active.id)) {
       const oldIndex = tasks.findIndex(t => t.id === active.id);
       const newIndex = tasks.findIndex(t => t.id === over.id);
+      if (newIndex === -1) return; // dropped on wrong target
+      const prevTasks = [...tasks];
       const newOrder = arrayMove(tasks, oldIndex, newIndex);
-      setTasks(newOrder); // Optimistic UI
+      setTasks(newOrder);
       try {
         await updateTaskOrder.mutateAsync(newOrder.map(t => t.id));
       } catch (err) {
-        setTasks(tasks); // Rollback
+        console.error('[DnD] Task reorder failed:', err);
+        setTasks(prevTasks);
       }
       return;
     }
@@ -474,33 +584,38 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
     if (taskGroups.some(g => g.id === active.id)) {
       const oldIndex = taskGroups.findIndex(g => g.id === active.id);
       const newIndex = taskGroups.findIndex(g => g.id === over.id);
+      if (newIndex === -1) return; // dropped on wrong target (e.g. subtask)
+      const prevGroups = [...taskGroups];
       const newOrder = arrayMove(taskGroups, oldIndex, newIndex);
-      setTaskGroups(newOrder); // Optimistic UI
+      setTaskGroups(newOrder);
       try {
         await updateGroupOrder.mutateAsync(newOrder.map(g => g.id));
       } catch (err) {
-        setTaskGroups(taskGroups); // Rollback
+        console.error('[DnD] Group reorder failed:', err);
+        setTaskGroups(prevGroups);
       }
       return;
     }
 
-    // 3. Reorder Subtasks
+    // 3. Reorder Subtasks within a group
     for (const group of taskGroups) {
       if (group.items.some(i => i.id === active.id)) {
         const oldIndex = group.items.findIndex(i => i.id === active.id);
         const newIndex = group.items.findIndex(i => i.id === over.id);
 
         if (newIndex !== -1) {
+          const prevGroups = [...taskGroups];
           const newItems = arrayMove(group.items, oldIndex, newIndex);
           const updatedGroups = taskGroups.map(g =>
             g.id === group.id ? { ...g, items: newItems } : g
           );
 
-          setTaskGroups(updatedGroups); // Optimistic UI
+          setTaskGroups(updatedGroups);
           try {
             await updateSubtaskOrder.mutateAsync(newItems.map(i => i.id));
           } catch (err) {
-            setTaskGroups(taskGroups); // Rollback
+            console.error('[DnD] Subtask reorder failed:', err);
+            setTaskGroups(prevGroups);
           }
         }
         break;
@@ -557,8 +672,8 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
       } else {
         await updateTaskMutation.mutateAsync({
           taskId: activeTask.id,
-          updates: { 
-            status: newStatus, 
+          updates: {
+            status: newStatus,
             progress: 50,
             needs_changes: true,
             changes_completed: false
@@ -773,8 +888,8 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
                     disabled={!isAssignee || activeTask.status === 'review' || activeTask.status === 'done'}
                     onClick={(e) => setStatusAnchor(e.currentTarget)}
                     className={`flex items-center gap-2.5 px-3 py-1.5 rounded-full transition-all border ${activeTask.status === 'done' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
-                        activeTask.status === 'review' ? 'bg-amber-50 text-amber-600 border-amber-100' :
-                          'bg-success-light/20 text-success border-success/10'
+                      activeTask.status === 'review' ? 'bg-amber-50 text-amber-600 border-amber-100' :
+                        'bg-success-light/20 text-success border-success/10'
                       } ${isAssignee && activeTask.status !== 'review' && activeTask.status !== 'done' ? 'hover:bg-white hover:shadow-sm cursor-pointer' : 'cursor-default opacity-80'}`}
                   >
                     <div className="w-5 h-5 rounded-full flex items-center justify-center bg-current opacity-20">
@@ -878,8 +993,7 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
                 <div className="flex items-center gap-4 py-2.5 pl-20 pr-4 bg-slate-50/50 border-b border-slate-100 text-[9px] font-bold text-slate-400 uppercase tracking-[0.1em]">
                   <span className="flex-1">Task Description</span>
                   <div className="flex items-center justify-end gap-6">
-                    <span className="w-[80px]">Due Date</span>
-                    <span className="w-[80px]">Updated At</span>
+                    <span className="w-[160px]">Updated At</span>
                     <span className="w-[48px] text-center">Status</span>
                     <span className="w-[28px]"></span>
                   </div>
@@ -890,7 +1004,14 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
                     {taskGroups.map((group, idx) => (
                       <SortableGroup
                         key={group.id}
-                        group={group}
+                        group={{
+                          ...group,
+                          onEdit: (g) => { setEditItemData({ ...g, type: 'group' }); setAddGroupModalOpen(true); },
+                          items: group.items.map(item => ({
+                            ...item,
+                            onEdit: (i) => { setEditItemData({ ...i, type: 'subtask' }); setAddGroupModalOpen(true); }
+                          }))
+                        }}
                         index={idx}
                         expanded={expandedGroups.includes(group.id)}
                         onToggle={(id) => setExpandedGroups(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])}
@@ -898,6 +1019,8 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
                         isLast={idx === taskGroups.length - 1}
                         onToggleGroup={handleToggleGroupStatus}
                         canEdit={canEdit}
+                        onDeleteGroup={handleDeleteGroup}
+                        onDeleteSubtask={handleDeleteSubtask}
                       />
                     ))}
                   </SortableContext>
@@ -948,8 +1071,8 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
                                 </span>
                               </div>
                               <div className={`relative text-xs leading-relaxed p-3.5 rounded-2xl rounded-tl-none border transition-all duration-500 ${comment.message.includes('Approved') ? 'bg-emerald-50/50 border-emerald-100 text-emerald-800' :
-                                  comment.message.includes('Changes Requested') ? (comment.is_resolved ? 'bg-emerald-50/50 border-emerald-100 text-emerald-800' : 'bg-red-50/50 border-red-100 text-red-800') :
-                                    'bg-slate-50/80 border-slate-100 text-slate-600'
+                                comment.message.includes('Changes Requested') ? (comment.is_resolved ? 'bg-emerald-50/50 border-emerald-100 text-emerald-800' : 'bg-red-50/50 border-red-100 text-red-800') :
+                                  'bg-slate-50/80 border-slate-100 text-slate-600'
                                 }`}>
                                 {comment.message.includes('**') ? (
                                   <div dangerouslySetInnerHTML={{ __html: comment.message.replace(/\*\*(.*?)\*\*/g, '<b class="font-black uppercase tracking-tight">$1</b>') }} />
@@ -960,8 +1083,8 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
                                     disabled={!isAssignee || toggleCommentResolution.isPending}
                                     onClick={() => toggleCommentResolution.mutate({ commentId: comment.id, isResolved: !comment.is_resolved, taskId: activeTask.id })}
                                     className={`absolute -right-2 -top-3 h-6 px-2.5 rounded-full flex items-center gap-1.5 border transition-all shadow-md group/tick ${comment.is_resolved
-                                        ? 'bg-emerald-500 text-white border-emerald-600 scale-105'
-                                        : 'bg-white text-slate-400 border-slate-200 hover:text-emerald-600 hover:border-emerald-200 hover:scale-105'
+                                      ? 'bg-emerald-500 text-white border-emerald-600 scale-105'
+                                      : 'bg-white text-slate-400 border-slate-200 hover:text-emerald-600 hover:border-emerald-200 hover:scale-105'
                                       } ${!isAssignee ? 'cursor-default' : 'cursor-pointer active:scale-95'}`}
                                   >
                                     <span className="text-[9px] font-black uppercase tracking-widest">{comment.is_resolved ? 'Fixed' : 'Done'}</span>
@@ -1041,8 +1164,8 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
             <div className="p-6 flex items-start justify-between">
               <div className="flex items-center gap-4">
                 <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-500 ${reviewModal.type === 'approve'
-                    ? 'bg-emerald-50 text-emerald-500 border border-emerald-100 shadow-sm'
-                    : 'bg-[#FFF4EC] text-[#FF8A00] border border-[#FFE1CC] shadow-sm'
+                  ? 'bg-emerald-50 text-emerald-500 border border-emerald-100 shadow-sm'
+                  : 'bg-[#FFF4EC] text-[#FF8A00] border border-[#FFE1CC] shadow-sm'
                   }`}>
                   {reviewModal.type === 'approve' ? <CheckCircle2 size={24} /> : <AlertCircle size={24} />}
                 </div>
@@ -1084,8 +1207,8 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
               <div className="relative group">
                 <textarea
                   className={`w-full bg-[#FAFBFF] border border-slate-100 rounded-2xl p-5 text-xs font-medium placeholder:text-slate-400 transition-all duration-300 resize-none min-h-[160px] shadow-inner ${reviewModal.type === 'approve'
-                      ? 'focus:border-emerald-400 focus:ring-4 focus:ring-emerald-400/5'
-                      : 'focus:border-[#FF8A00] focus:ring-4 focus:ring-[#FF8A00]/5'
+                    ? 'focus:border-emerald-400 focus:ring-4 focus:ring-emerald-400/5'
+                    : 'focus:border-[#FF8A00] focus:ring-4 focus:ring-[#FF8A00]/5'
                     }`}
                   autoFocus
                   maxLength={500}
@@ -1128,8 +1251,8 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
                   addCommentMutation.isPending
                 }
                 className={`flex-[1.8] h-12 rounded-2xl flex items-center justify-center gap-3 text-[11px] font-black uppercase tracking-widest text-white shadow-xl transition-all active:scale-95 disabled:opacity-50 disabled:grayscale group ${reviewModal.type === 'approve'
-                    ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 shadow-emerald-200'
-                    : 'bg-gradient-to-r from-[#FF8A00] to-[#FF3D3D] shadow-orange-200'
+                  ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 shadow-emerald-200'
+                  : 'bg-gradient-to-r from-[#FF8A00] to-[#FF3D3D] shadow-orange-200'
                   }`}
               >
                 {(updateTaskMutation.isPending || markAsDoneMutation.isPending || addCommentMutation.isPending) ? (
@@ -1153,9 +1276,10 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
 
       <AddTaskModal
         open={isAddGroupModalOpen}
-        onClose={() => { setAddGroupModalOpen(false); setAddingToGroupId(null); }}
+        onClose={() => { setAddGroupModalOpen(false); setAddingToGroupId(null); setEditItemData(null); }}
         onCreate={handleCreateGroupOrItem}
-        title={addingToGroupId ? "Add Subtask" : "Add Task Group"}
+        title={editItemData ? (editItemData.type === 'group' ? "Edit Task Group" : "Edit Subtask") : addingToGroupId ? "Add Subtask" : "Add Task Group"}
+        initialData={editItemData}
         subtitle={addingToGroupId ? "Add a specific item to this group breakdown." : "Create a clean task group inside this project."}
         showDueDate={!addingToGroupId}
       />
@@ -1164,7 +1288,7 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
 };
 
 // --- View 1: Task Grid ---
-const TaskGrid = ({ tasks, onTaskClick, currentUserId, onSubmitReview, onMarkDone }) => {
+const TaskGrid = ({ tasks, onTaskClick, onTaskMenuClick, currentUserId, onSubmitReview, onMarkDone }) => {
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -1189,7 +1313,14 @@ const TaskGrid = ({ tasks, onTaskClick, currentUserId, onSubmitReview, onMarkDon
                 {task.priority === 'High' ? <AlertCircle size={24} /> :
                   task.priority === 'Medium' ? <Briefcase size={24} /> : <CheckCircle size={24} />}
               </div>
-              <IconButton size="small" className="text-slate-200 opacity-0 group-hover:opacity-100 transition-opacity">
+              <IconButton
+                size="small"
+                className="text-slate-200 opacity-0 group-hover:opacity-100 transition-opacity"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onTaskMenuClick(e.currentTarget, task);
+                }}
+              >
                 <MoreVertical size={18} />
               </IconButton>
             </div>
@@ -1299,7 +1430,7 @@ const TaskGrid = ({ tasks, onTaskClick, currentUserId, onSubmitReview, onMarkDon
 };
 
 // --- View 2: Compact List ---
-const TaskCompactList = ({ tasks, onTaskClick }) => {
+const TaskCompactList = ({ tasks, onTaskClick, onTaskMenuClick }) => {
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -1314,10 +1445,9 @@ const TaskCompactList = ({ tasks, onTaskClick }) => {
           className="bg-white rounded-xl py-2.5 px-5 border border-slate-100 hover:border-primary/20 hover:shadow-md transition-all cursor-pointer group flex items-center justify-between"
         >
           <div className="flex items-center gap-4">
-            <div className={`w-2 h-2 rounded-full ${
-              task.priority === 'High' ? 'bg-red-500' :
+            <div className={`w-2 h-2 rounded-full ${task.priority === 'High' ? 'bg-red-500' :
               task.priority === 'Medium' ? 'bg-amber-500' : 'bg-primary'
-            }`} />
+              }`} />
             <h3 className="text-sm font-bold text-slate-900 group-hover:text-primary transition-colors">
               {task.title}
             </h3>
@@ -1332,6 +1462,15 @@ const TaskCompactList = ({ tasks, onTaskClick }) => {
               {task.deadline ? new Date(task.deadline).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : 'No date'}
             </span>
             <StatusChip status={task.status} />
+            <IconButton
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation();
+                onTaskMenuClick(e.currentTarget, task);
+              }}
+            >
+              <MoreVertical size={16} className="text-slate-300" />
+            </IconButton>
           </div>
         </div>
       ))}
@@ -1340,7 +1479,7 @@ const TaskCompactList = ({ tasks, onTaskClick }) => {
 };
 
 // --- View 3: Detailed List ---
-const TaskDetailedList = ({ tasks, onTaskClick, currentUserId }) => {
+const TaskDetailedList = ({ tasks, onTaskClick, onTaskMenuClick, currentUserId }) => {
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -1357,10 +1496,9 @@ const TaskDetailedList = ({ tasks, onTaskClick, currentUserId }) => {
             className="bg-white rounded-[24px] p-6 border border-slate-100 hover:border-primary/20 hover:shadow-lg transition-all cursor-pointer group flex items-center gap-8"
           >
             <div className="flex items-center gap-4 w-[30%]">
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                task.priority === 'High' ? 'bg-red-50 text-red-500' :
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${task.priority === 'High' ? 'bg-red-50 text-red-500' :
                 task.priority === 'Medium' ? 'bg-amber-50 text-amber-600' : 'bg-primary-light text-primary'
-              }`}>
+                }`}>
                 {task.priority === 'High' ? <AlertCircle size={20} /> :
                   task.priority === 'Medium' ? <Briefcase size={20} /> : <CheckCircle size={20} />}
               </div>
@@ -1388,8 +1526,8 @@ const TaskDetailedList = ({ tasks, onTaskClick, currentUserId }) => {
                 <span className="text-[9px] font-bold text-slate-900">{task.progress}%</span>
               </div>
               <div className="w-full h-1.5 bg-slate-50 rounded-full overflow-hidden">
-                <div 
-                  className={`h-full rounded-full transition-all duration-1000 ${getProgressColor(task.progress, task.status)}`} 
+                <div
+                  className={`h-full rounded-full transition-all duration-1000 ${getProgressColor(task.progress, task.status)}`}
                   style={{ width: `${task.progress}%` }}
                 ></div>
               </div>
@@ -1406,6 +1544,15 @@ const TaskDetailedList = ({ tasks, onTaskClick, currentUserId }) => {
                 </div>
               </div>
               <StatusChip status={task.status} />
+              <IconButton
+                size="small"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onTaskMenuClick(e.currentTarget, task);
+                }}
+              >
+                <MoreVertical size={18} className="text-slate-300" />
+              </IconButton>
             </div>
           </div>
         );
@@ -1428,7 +1575,6 @@ const TaskSkeleton = () => (
   </div>
 );
 
-// --- Main Page Component ---
 const MyTasks = () => {
   const { id: taskId } = useParams();
   const navigate = useNavigate();
@@ -1436,44 +1582,54 @@ const MyTasks = () => {
   const [activeTask, setActiveTask] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isModalOpen, setModalOpen] = useState(false);
-  const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'compact' | 'detailed'
+  const [viewMode, setViewMode] = useState('grid');
   const [viewAnchor, setViewAnchor] = useState(null);
-  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'pending' | 'completed'
+  const [statusFilter, setStatusFilter] = useState('all');
   const [filterAnchor, setFilterAnchor] = useState(null);
+  const [taskMenu, setTaskMenu] = useState({ anchor: null, task: null });
+  const [editingTask, setEditingTask] = useState(null);
+  const [taskTab, setTaskTab] = useState('assigned_to');
 
-  // ── Real data ──
   const { data: rawTasks = [], isLoading, error: fetchError } = useMyTasks(user?.id);
   const tasks = useMemo(() => {
-    if (fetchError) {
-      console.error('Task fetch error:', fetchError);
-      return [];
-    }
+    if (fetchError) return [];
+
     return rawTasks
       .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.id.localeCompare(b.id))
       .map(normalizeTask);
   }, [rawTasks, fetchError]);
 
-  // ── Mutations ──
   const createTask = useCreateTask();
+  const updateTask = useUpdateTask();
+  const deleteTask = useDeleteTask();
   const submitReview = useSubmitForReview();
   const markDone = useMarkAsDone();
+  const queryClient = useQueryClient();
 
-  // Derive view from presence of taskId
+  useEffect(() => {
+    const channel = supabase
+      .channel('tasks_realtime_sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
+
   const view = taskId ? 'workspace' : 'grid';
 
-  // Synchronize activeTask based on URL parameter
   useEffect(() => {
     if (taskId) {
       const task = tasks.find(t => String(t.id) === String(taskId));
       if (task) {
         setActiveTask(task);
-        // Store task name for breadcrumb label and update title
         localStorage.setItem(`breadcrumb_label_${task.id}`, task.title);
         document.title = `${task.title} | EMS Portal`;
-        // Force a storage event for the breadcrumb to pick up (if it was listening)
         window.dispatchEvent(new Event('storage'));
       } else if (!isLoading && tasks.length > 0) {
-        // If task ID is invalid, redirect back to the main list
         navigate('/my-tasks', { replace: true });
       }
     } else {
@@ -1482,18 +1638,59 @@ const MyTasks = () => {
   }, [taskId, tasks, isLoading, navigate]);
 
   const handleCreateTask = async (payload) => {
-    const task = await createTask.mutateAsync(payload);
-    // Notify assignee if different from creator
-    if (payload.assignedTo !== user.id) {
+    try {
+      if (payload.id) {
+        await updateTask.mutateAsync({
+          taskId: payload.id,
+          updates: {
+            title: payload.title,
+            project_name: payload.projectName,
+            assigned_to: payload.assignedTo,
+            deadline: payload.deadline,
+            priority: payload.priority,
+            description: payload.description
+          },
+          actorId: user.id,
+          actionType: 'updated'
+        });
+        setEditingTask(null);
+      } else {
+        await createTask.mutateAsync(payload);
+        if (payload.assignedTo !== user.id) {
+          try {
+            await notificationService.notifyUser?.(
+              payload.assignedTo,
+              'New Task Assigned',
+              `${profile?.full_name || 'Someone'} assigned you: "${payload.title}"`,
+              'task',
+              '/my-tasks'
+            );
+          } catch (_) { }
+        }
+      }
+      setModalOpen(false);
+    } catch (err) {
+      console.error('Task action failed:', err);
+    }
+  };
+
+  const handleDeleteTask = async (task) => {
+    setTaskMenu({ anchor: null, task: null });
+    const { default: Swal } = await import('sweetalert2');
+    const result = await Swal.fire({
+      title: 'Delete Task?',
+      text: `Are you sure you want to delete "${task.title}"?`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#EF4444',
+      confirmButtonText: 'Yes, delete it'
+    });
+    if (result.isConfirmed) {
       try {
-        await notificationService.notifyUser?.(
-          payload.assignedTo,
-          'New Task Assigned',
-          `${profile?.full_name || 'Someone'} assigned you: "${payload.title}"`,
-          'task',
-          '/my-tasks'
-        );
-      } catch (_) { /* non-critical */ }
+        await deleteTask.mutateAsync(task.id);
+      } catch (err) {
+        Swal.fire('Error', err.message || 'Failed to delete task', 'error');
+      }
     }
   };
 
@@ -1513,15 +1710,12 @@ const MyTasks = () => {
     }
   };
 
-  const [taskTab, setTaskTab] = useState('assigned_to'); // 'assigned_to' | 'assigned_by'
-
   const handleMarkDone = (task) =>
     markDone.mutateAsync({ taskId: task.id, actorId: user.id, oldStatus: task.status });
 
   const handleTaskClick = (task) => {
     navigate(`/my-tasks/${task.id}`);
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    // Acknowledge if assignee opens it for the first time
     if (!task.is_acknowledged && task.assigned_to === user?.id) {
       taskService.acknowledgeTask(task.id, user.id);
     }
@@ -1531,15 +1725,9 @@ const MyTasks = () => {
     const matchesSearch = t.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       t.project_name?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesTab = taskTab === 'assigned_to' ? t.assigned_to === user?.id : t.assigned_by === user?.id;
-
-    // Status filtering
     let matchesStatus = true;
-    if (statusFilter === 'pending') {
-      matchesStatus = t.status !== 'done'; // Show everything not completed
-    } else if (statusFilter === 'completed') {
-      matchesStatus = t.status === 'done';
-    }
-
+    if (statusFilter === 'pending') matchesStatus = t.status !== 'done';
+    else if (statusFilter === 'completed') matchesStatus = t.status === 'done';
     return matchesSearch && matchesTab && matchesStatus;
   });
 
@@ -1560,7 +1748,6 @@ const MyTasks = () => {
                   />
                 </div>
 
-                {/* View Switcher Dropdown */}
                 <div className="relative">
                   <button
                     onClick={(e) => setViewAnchor(e.currentTarget)}
@@ -1570,8 +1757,7 @@ const MyTasks = () => {
                       viewMode === 'compact' ? <List size={18} className="text-primary" /> :
                         <Columns size={18} className="text-primary" />}
                     <span className="text-[10px] font-black uppercase tracking-widest text-slate-600">
-                      {viewMode === 'grid' ? 'Grid View' :
-                        viewMode === 'compact' ? 'Compact' : 'Detailed'}
+                      {viewMode === 'grid' ? 'Grid View' : viewMode === 'compact' ? 'Compact' : 'Detailed'}
                     </span>
                     <ChevronDownIcon size={14} className="text-slate-300" />
                   </button>
@@ -1582,14 +1768,7 @@ const MyTasks = () => {
                     onClose={() => setViewAnchor(null)}
                     slotProps={{
                       paper: {
-                        sx: {
-                          mt: 1,
-                          borderRadius: '20px',
-                          p: 1,
-                          width: 180,
-                          boxShadow: 'var(--shadow-premium)',
-                          border: '1px solid var(--border-light)'
-                        }
+                        sx: { mt: 1, borderRadius: '20px', p: 1, width: 180, boxShadow: 'var(--shadow-premium)', border: '1px solid var(--border-light)' }
                       }
                     }}
                   >
@@ -1602,33 +1781,30 @@ const MyTasks = () => {
                         key={item.id}
                         onClick={() => { setViewMode(item.id); setViewAnchor(null); }}
                         sx={{
-                          borderRadius: '12px',
-                          py: 1.5,
-                          px: 2,
-                          gap: 2,
+                          borderRadius: '12px', mb: 0.5, py: 1, px: 1.5,
                           bgcolor: viewMode === item.id ? 'var(--primary-light)' : 'transparent',
                           '&:hover': { bgcolor: 'var(--slate-50)' }
                         }}
                       >
-                        <item.icon size={16} className={viewMode === item.id ? 'text-primary' : 'text-slate-400'} />
-                        <span className={`text-[10px] font-bold uppercase tracking-widest ${viewMode === item.id ? 'text-primary' : 'text-slate-600'}`}>
-                          {item.label}
-                        </span>
+                        <div className="flex items-center gap-3 w-full">
+                          <item.icon size={16} className={viewMode === item.id ? 'text-primary' : 'text-slate-400'} />
+                          <span className={`text-[10px] font-bold uppercase tracking-widest ${viewMode === item.id ? 'text-primary' : 'text-slate-600'}`}>
+                            {item.label}
+                          </span>
+                        </div>
                       </MenuItem>
                     ))}
                   </Menu>
                 </div>
 
-                {/* Status Filter Dropdown */}
                 <div className="relative">
                   <button
                     onClick={(e) => setFilterAnchor(e.currentTarget)}
                     className="h-12 px-5 bg-white border border-slate-100 rounded-2xl flex items-center gap-3 hover:bg-slate-50 transition-all shadow-sm"
                   >
-                    <Filter size={18} className="text-primary" />
+                    <Filter size={18} className="text-slate-400" />
                     <span className="text-[10px] font-black uppercase tracking-widest text-slate-600">
-                      {statusFilter === 'all' ? 'All Tasks' :
-                        statusFilter === 'pending' ? 'Pending' : 'Completed'}
+                      {statusFilter === 'all' ? 'All Tasks' : statusFilter === 'pending' ? 'Active' : 'Finished'}
                     </span>
                     <ChevronDownIcon size={14} className="text-slate-300" />
                   </button>
@@ -1639,35 +1815,24 @@ const MyTasks = () => {
                     onClose={() => setFilterAnchor(null)}
                     slotProps={{
                       paper: {
-                        sx: {
-                          mt: 1,
-                          borderRadius: '20px',
-                          p: 1,
-                          width: 180,
-                          boxShadow: 'var(--shadow-premium)',
-                          border: '1px solid var(--border-light)'
-                        }
+                        sx: { mt: 1, borderRadius: '20px', p: 1, width: 180, boxShadow: 'var(--shadow-premium)', border: '1px solid var(--border-light)' }
                       }
                     }}
                   >
                     {[
-                      { id: 'all', label: 'All Tasks', icon: Layers },
-                      { id: 'pending', label: 'Pending Only', icon: Clock },
-                      { id: 'completed', label: 'Completed Only', icon: CheckCircle },
+                      { id: 'all', label: 'All Tasks' },
+                      { id: 'pending', label: 'Active Tasks' },
+                      { id: 'completed', label: 'Finished Tasks' },
                     ].map((item) => (
                       <MenuItem
                         key={item.id}
                         onClick={() => { setStatusFilter(item.id); setFilterAnchor(null); }}
                         sx={{
-                          borderRadius: '12px',
-                          py: 1.5,
-                          px: 2,
-                          gap: 2,
+                          borderRadius: '12px', mb: 0.5, py: 1, px: 1.5,
                           bgcolor: statusFilter === item.id ? 'var(--primary-light)' : 'transparent',
                           '&:hover': { bgcolor: 'var(--slate-50)' }
                         }}
                       >
-                        <item.icon size={16} className={statusFilter === item.id ? 'text-primary' : 'text-slate-400'} />
                         <span className={`text-[10px] font-bold uppercase tracking-widest ${statusFilter === item.id ? 'text-primary' : 'text-slate-600'}`}>
                           {item.label}
                         </span>
@@ -1678,120 +1843,90 @@ const MyTasks = () => {
 
                 <button
                   onClick={() => setModalOpen(true)}
-                  className="btn-ems btn-ems-primary h-12 rounded-2xl px-8 shadow-xl shadow-primary/20 text-xs font-bold"
+                  className="h-12 px-8 rounded-2xl flex items-center gap-3 hover:scale-[1.02] active:scale-[0.98] transition-all shadow-lg"
+                  style={{ backgroundColor: '#635bff', color: '#ffffff', border: 'none', boxShadow: '0 14px 28px rgba(99,91,255,0.26)' }}
                 >
-                  <Plus size={18} className="mr-1" /> New Task
+                  <Plus size={20} strokeWidth={3} />
+                  <span className="text-xs font-black uppercase tracking-widest">New Task</span>
                 </button>
               </div>
             </PageHeader>
 
-            {/* TAB SWITCHER */}
-            <div className="flex items-center gap-2 mb-10 p-1.5 bg-slate-100/50 rounded-[20px] w-fit border border-slate-100 shadow-inner">
-              <button
-                onClick={() => setTaskTab('assigned_to')}
-                className={`flex items-center gap-2.5 px-6 py-2.5 rounded-[16px] text-[10px] font-black uppercase tracking-widest transition-all duration-300 ${taskTab === 'assigned_to'
-                    ? 'bg-white text-primary shadow-premium'
-                    : 'text-slate-400 hover:text-slate-600'
-                  }`}
-              >
-                <Briefcase size={14} className={taskTab === 'assigned_to' ? 'text-primary' : 'text-slate-300'} />
-                Assigned to Me
-                {tasks.filter(t => t.assigned_to === user?.id).length > 0 && (
-                  <span className={`ml-1 px-1.5 py-0.5 rounded-md text-[8px] ${taskTab === 'assigned_to' ? 'bg-primary-light text-primary' : 'bg-slate-200 text-slate-500'}`}>
-                    {tasks.filter(t => t.assigned_to === user?.id).length}
-                  </span>
-                )}
-              </button>
-              <button
-                onClick={() => setTaskTab('assigned_by')}
-                className={`flex items-center gap-2.5 px-6 py-2.5 rounded-[16px] text-[10px] font-black uppercase tracking-widest transition-all duration-300 ${taskTab === 'assigned_by'
-                    ? 'bg-white text-primary shadow-premium'
-                    : 'text-slate-400 hover:text-slate-600'
-                  }`}
-              >
-                <Layout size={14} className={taskTab === 'assigned_by' ? 'text-primary' : 'text-slate-300'} />
-                Assigned by Me
-                {tasks.filter(t => t.assigned_by === user?.id).length > 0 && (
-                  <span className={`ml-1 px-1.5 py-0.5 rounded-md text-[8px] ${taskTab === 'assigned_by' ? 'bg-primary-light text-primary' : 'bg-slate-200 text-slate-500'}`}>
-                    {tasks.filter(t => t.assigned_by === user?.id).length}
-                  </span>
-                )}
-              </button>
-            </div>
-
-            {isLoading ? <TaskSkeleton /> : fetchError ? (
-              <div className="flex flex-col items-center justify-center py-24 text-red-500">
-                <AlertCircle size={48} className="mb-4 opacity-50" />
-                <p className="text-sm font-bold">Failed to load tasks</p>
-                <p className="text-xs mt-1 text-slate-400">Please ensure the database schema is up to date.</p>
+            <div className="max-w-[1320px] mx-auto px-6">
+              <div className="flex gap-2 p-1.5 bg-slate-100/50 backdrop-blur-md rounded-[24px] border border-slate-100 w-fit mb-12 shadow-inner">
                 <button
-                  onClick={() => window.location.reload()}
-                  className="mt-6 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all"
+                  onClick={() => setTaskTab('assigned_to')}
+                  className={`px-8 py-3.5 rounded-[18px] text-[10px] font-black uppercase tracking-widest transition-all ${taskTab === 'assigned_to' ? 'bg-white text-slate-900 shadow-lg shadow-slate-200/50 scale-[1.02]' : 'text-slate-400 hover:text-slate-600'}`}
                 >
-                  Retry Connection
+                  Assigned to me <span className="ml-2 opacity-50">{tasks.filter(t => t.assigned_to === user?.id).length}</span>
+                </button>
+                <button
+                  onClick={() => setTaskTab('assigned_by')}
+                  className={`px-8 py-3.5 rounded-[18px] text-[10px] font-black uppercase tracking-widest transition-all ${taskTab === 'assigned_by' ? 'bg-white text-slate-900 shadow-lg shadow-slate-200/50 scale-[1.02]' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  Assigned by me <span className="ml-2 opacity-50">{tasks.filter(t => t.assigned_by === user?.id).length}</span>
                 </button>
               </div>
-            ) : filteredTasks.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-24 text-slate-400">
-                <CheckCircle size={48} className="mb-4 opacity-20" />
-                <p className="text-sm font-bold">No tasks yet</p>
-                <p className="text-xs mt-1">Create your first task or wait for an assignment</p>
-              </div>
-            ) : (
-              <AnimatePresence mode="wait">
-                {viewMode === 'grid' ? (
-                  <TaskGrid
-                    key="grid"
-                    tasks={filteredTasks}
-                    onTaskClick={handleTaskClick}
-                    currentUserId={user?.id}
-                    onSubmitReview={handleSubmitForReview}
-                    onMarkDone={handleMarkDone}
-                  />
-                ) : viewMode === 'compact' ? (
-                  <div className="max-w-5xl">
-                    <TaskCompactList
-                      key="compact"
-                      tasks={filteredTasks}
-                      onTaskClick={handleTaskClick}
-                    />
+
+              {isLoading ? <TaskSkeleton /> : filteredTasks.length === 0 ? (
+                <div className="py-24 flex flex-col items-center justify-center text-center">
+                  <div className="w-24 h-24 bg-slate-50 rounded-[40px] flex items-center justify-center mb-8 border border-slate-100">
+                    <Layout size={40} className="text-slate-200" />
                   </div>
-                ) : (
-                  <div className="max-w-6xl">
-                    <TaskDetailedList
-                      key="detailed"
-                      tasks={filteredTasks}
-                      onTaskClick={handleTaskClick}
-                      currentUserId={user?.id}
-                    />
-                  </div>
-                )}
-              </AnimatePresence>
-            )}
+                  <h3 className="text-xl font-bold text-slate-900 mb-2">No tasks found</h3>
+                  <p className="text-slate-400 max-w-xs text-sm">
+                    {searchQuery ? `We couldn't find any tasks matching "${searchQuery}"` : "You're all caught up!"}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {viewMode === 'grid' && (
+                    <TaskGrid tasks={filteredTasks} onTaskClick={handleTaskClick} onTaskMenuClick={(anchor, task) => setTaskMenu({ anchor, task })} currentUserId={user?.id} onSubmitReview={handleSubmitForReview} onMarkDone={handleMarkDone} />
+                  )}
+                  {viewMode === 'compact' && <TaskCompactList tasks={filteredTasks} onTaskClick={handleTaskClick} onTaskMenuClick={(anchor, task) => setTaskMenu({ anchor, task })} />}
+                  {viewMode === 'detailed' && <TaskDetailedList tasks={filteredTasks} onTaskClick={handleTaskClick} onTaskMenuClick={(anchor, task) => setTaskMenu({ anchor, task })} currentUserId={user?.id} />}
+                </>
+              )}
+            </div>
+
+            <Menu
+              anchorEl={taskMenu.anchor}
+              open={Boolean(taskMenu.anchor)}
+              onClose={() => setTaskMenu({ anchor: null, task: null })}
+              slotProps={{
+                paper: { sx: { borderRadius: '20px', p: 1, width: 200, boxShadow: 'var(--shadow-premium)', border: '1px solid var(--border-light)' } }
+              }}
+            >
+              <MenuItem onClick={() => { handleTaskClick(taskMenu.task); setTaskMenu({ anchor: null, task: null }); }} sx={{ borderRadius: '12px', mb: 0.5, py: 1.25, px: 2 }}>
+                <div className="flex items-center gap-3 w-full">
+                  <Layout size={16} className="text-slate-400" />
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-600">Open Workspace</span>
+                </div>
+              </MenuItem>
+              {taskMenu.task?.assigned_by === user?.id && (
+                <>
+                  <div className="h-px bg-slate-50 my-1 mx-2" />
+                  <MenuItem onClick={() => { setEditingTask(taskMenu.task); setModalOpen(true); setTaskMenu({ anchor: null, task: null }); }} sx={{ borderRadius: '12px', mb: 0.5, py: 1.25, px: 2 }}>
+                    <div className="flex items-center gap-3 w-full">
+                      <Zap size={16} className="text-indigo-500" />
+                      <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600">Edit Task</span>
+                    </div>
+                  </MenuItem>
+                  <MenuItem onClick={() => handleDeleteTask(taskMenu.task)} sx={{ borderRadius: '12px', py: 1.25, px: 2, '&:hover': { bgcolor: 'red.50' } }}>
+                    <div className="flex items-center gap-3 w-full">
+                      <Trash2 size={16} className="text-red-500" />
+                      <span className="text-[10px] font-black uppercase tracking-widest text-red-600">Delete Task</span>
+                    </div>
+                  </MenuItem>
+                </>
+              )}
+            </Menu>
           </motion.div>
         ) : (
-          activeTask && (
-            <TaskWorkspace
-              key="workspace"
-              activeTask={activeTask}
-              allTasks={tasks}
-              onTaskSelect={t => handleTaskClick(t)}
-              onBack={() => navigate('/my-tasks')}
-              onAddTask={() => setModalOpen(true)}
-              currentUserId={user?.id}
-              onSubmitReview={handleSubmitForReview}
-              onMarkDone={handleMarkDone}
-            />
-          )
+          <TaskWorkspace activeTask={activeTask} allTasks={tasks} onTaskSelect={handleTaskClick} onBack={() => navigate('/my-tasks')} onAddTask={() => setModalOpen(true)} currentUserId={user?.id} onSubmitReview={handleSubmitForReview} onMarkDone={handleMarkDone} />
         )}
       </AnimatePresence>
-
-      <CreateTaskModal
-        open={isModalOpen}
-        onClose={() => setModalOpen(false)}
-        onCreate={handleCreateTask}
-        isSubmitting={createTask.isPending}
-      />
+      <CreateTaskModal open={isModalOpen} onClose={() => { setModalOpen(false); setEditingTask(null); }} onCreate={handleCreateTask} initialData={editingTask} isSubmitting={createTask.isPending || updateTask.isPending} />
     </div>
   );
 };

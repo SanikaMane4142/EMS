@@ -99,10 +99,10 @@ const NoticeBoard = ({ announcements = [] }) => {
       {selectedNotice && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xl animate-in fade-in duration-300"
              container={() => document.getElementById('root')}>
-          <div className="bg-white/95 w-full max-w-xl rounded-[32px] shadow-[0_30px_100px_rgba(0,0,0,0.25)] overflow-hidden animate-in zoom-in-95 duration-300 border border-white/50">
-            <div className={`h-2 w-full ${getPriorityStyles(selectedNotice.priority).badge} opacity-80`} />
+          <div className="bg-white/95 w-full max-w-xl max-h-[90vh] rounded-[32px] shadow-[0_30px_100px_rgba(0,0,0,0.25)] overflow-hidden animate-in zoom-in-95 duration-300 border border-white/50 flex flex-col">
+            <div className={`h-2 w-full ${getPriorityStyles(selectedNotice.priority).badge} opacity-80 shrink-0`} />
             
-            <div className="p-8">
+            <div className="p-8 flex flex-col overflow-hidden">
               <div className="flex justify-between items-start mb-8">
                 <div className="flex items-center gap-4">
                   <div className={`w-14 h-14 rounded-2xl bg-white shadow-xl flex items-center justify-center border border-[#F3F4F6] ${getPriorityStyles(selectedNotice.priority).color}`}>
@@ -130,7 +130,7 @@ const NoticeBoard = ({ announcements = [] }) => {
                 </button>
               </div>
 
-              <div className="bg-[#F8FAFC] rounded-3xl p-6 border border-[#F3F4F6] mb-8">
+              <div className="bg-[#F8FAFC] rounded-3xl p-6 border border-[#F3F4F6] mb-8 max-h-[400px] overflow-y-auto custom-scrollbar">
                 <div 
                   className="text-[#374151] leading-[1.8] text-[16px] prose prose-indigo max-w-none"
                   dangerouslySetInnerHTML={{ __html: selectedNotice.content }}

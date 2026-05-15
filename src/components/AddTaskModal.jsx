@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Modal, Box, IconButton, Backdrop, Fade } from "@mui/material";
 import { X, Calendar } from "lucide-react";
 
@@ -213,7 +213,7 @@ const CreatedDateCard = ({ label }) => (
    ADD TASK MODAL
 ========================= */
 
-const AddTaskModal = ({ open, onClose, onCreate, title = "Add Task", subtitle = "Create a clean task group inside this project.", showDueDate = true }) => {
+const AddTaskModal = ({ open, onClose, onCreate, title = "Add Task", subtitle = "Create a clean task group inside this project.", showDueDate = true, initialData = null }) => {
   const [formData, setFormData] = useState({
     name: "",
     description: "",
@@ -221,16 +221,35 @@ const AddTaskModal = ({ open, onClose, onCreate, title = "Add Task", subtitle = 
     status: "Todo",
   });
 
+  useEffect(() => {
+    if (initialData && open) {
+      setFormData({
+        name: initialData.title || initialData.name || "",
+        description: initialData.description || "",
+        dueDate: initialData.due_date || initialData.dueDate || "",
+        status: initialData.status || "Todo",
+      });
+    } else if (!open) {
+      setFormData({
+        name: "",
+        description: "",
+        dueDate: "",
+        status: "Todo",
+      });
+    }
+  }, [initialData, open]);
+
   const handleCreate = () => {
     if (!formData.name.trim()) return;
 
     onCreate({
       ...formData,
-      id: `task-${Date.now()}`,
+      id: initialData?.id || `task-${Date.now()}`,
       title: formData.name, // Mapping 'name' to 'title' for consistency
-      createdAt: new Date().toISOString().split('T')[0],
-      progress: 0,
-      subtasks: [],
+      createdAt: initialData?.created_at || new Date().toISOString().split('T')[0],
+      progress: initialData?.progress || 0,
+      subtasks: initialData?.subtasks || [],
+      isEdit: !!initialData,
     });
 
     setFormData({
@@ -279,20 +298,24 @@ const AddTaskModal = ({ open, onClose, onCreate, title = "Add Task", subtitle = 
 
           <button
             onClick={handleCreate}
+            disabled={!formData.name.trim()}
             style={{
               height: 44,
               padding: "0 28px",
               borderRadius: 999,
               border: "none",
-              background: "#635bff",
-              color: "#fff",
-              fontWeight: 900,
-              cursor: "pointer",
-              boxShadow:
-                "0 14px 28px rgba(99,91,255,0.26)",
+              background: formData.name.trim() ? "#635bff" : "#cbd5e1",
+              color: "#ffffff",
+              fontWeight: 800,
+              fontSize: "13px",
+              cursor: formData.name.trim() ? "pointer" : "not-allowed",
+              boxShadow: formData.name.trim()
+                ? "0 4px 14px rgba(99, 91, 255, 0.3)"
+                : "none",
+              transition: "all 0.2s ease",
             }}
           >
-            Create Task
+            {initialData ? "Save Changes" : "Create"}
           </button>
         </Box>
       }
@@ -350,56 +373,7 @@ const AddTaskModal = ({ open, onClose, onCreate, title = "Add Task", subtitle = 
           />
         </Box>
 
-        {/* DATE + STATUS */}
-        <Box
-          sx={{
-            display: "grid",
-            gridTemplateColumns: showDueDate ? {
-              xs: "1fr",
-              sm: "1fr 1fr",
-            } : "1fr",
-            gap: 2,
-          }}
-        >
-          {showDueDate && (
-            <Box>
-              <label style={labelSx}>Due Date</label>
 
-              <Box
-                component="input"
-                type="date"
-                value={formData.dueDate}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    dueDate: e.target.value,
-                  })
-                }
-                sx={fieldSx}
-              />
-            </Box>
-          )}
-
-          <Box>
-            <label style={labelSx}>Status</label>
-
-            <Box
-              component="select"
-              value={formData.status}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  status: e.target.value,
-                })
-              }
-              sx={fieldSx}
-            >
-              <option>Todo</option>
-              <option>In Progress</option>
-              <option>Completed</option>
-            </Box>
-          </Box>
-        </Box>
 
         {/* CREATED DATE */}
         <CreatedDateCard label="Created Today" />

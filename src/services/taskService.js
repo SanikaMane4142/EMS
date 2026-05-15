@@ -3,12 +3,13 @@ import { supabase } from '../lib/supabaseClient';
 /**
  * Select fragment used in all task queries.
  * Pulls nested groups → subtasks and both profile FKs.
+ * Includes is_deleted for client-side filtering.
  */
 const TASK_SELECT = `
   *,
   task_groups ( 
-    id, title, is_completed, sort_order, updated_at, 
-    subtasks ( id, title, is_completed, due_date, sort_order, updated_at ) 
+    id, title, is_completed, sort_order, updated_at, is_deleted, deleted_at,
+    subtasks ( id, title, is_completed, due_date, sort_order, updated_at, is_deleted, deleted_at ) 
   ),
   assignee:profiles!assigned_to ( 
     id, full_name, employee_id, department_id, 
@@ -26,25 +27,28 @@ export const taskService = {
    * Tasks visible to the current employee:
    *  - tasks they were assigned
    *  - tasks they created (assigned_by) — needed so assigner can mark reviewed
+   *  - excludes soft-deleted tasks
    */
   async getMyTasks(userId) {
     const { data, error } = await supabase
       .from('tasks')
       .select(TASK_SELECT)
       .or(`assigned_to.eq.${userId},assigned_by.eq.${userId}`)
+      .eq('is_deleted', false)
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: false });
     if (error) throw error;
     return data || [];
   },
 
-  /** HR / Admin: every task in the org */
+  /** HR / Admin: every task in the org (excludes soft-deleted) */
   async getAllTasks() {
     const { data, error } = await supabase
       .from('tasks')
       .select(TASK_SELECT)
+      .eq('is_deleted', false)
       .order('created_at', { ascending: false });
-    
+
     if (error) {
       console.error('[taskService] Error in getAllTasks:', error);
       throw error;
@@ -58,19 +62,21 @@ export const taskService = {
       .from('tasks')
       .select(TASK_SELECT)
       .eq('id', taskId)
+      .eq('is_deleted', false)
       .single();
     if (error) throw error;
     return data;
   },
 
   async getSubtaskGroups(taskId) {
-    // 1. Fetch groups for this task
+    // 1. Fetch groups for this task (excluding soft-deleted)
     const { data: groups, error: groupsError } = await supabase
       .from('task_groups')
       .select('*')
       .eq('task_id', taskId)
+      .eq('is_deleted', false)
       .order('sort_order', { ascending: true });
-    
+
     if (!groups || groups.length === 0) {
       console.log('[taskService] Direct group fetch returned no data, attempting fallback through tasks table...');
       // Fallback: Fetch groups by joining through the tasks table (which HR has broader access to)
@@ -79,35 +85,37 @@ export const taskService = {
         .select('task_groups(*)')
         .eq('id', taskId)
         .single();
-      
+
       if (fallbackError) {
         console.error('[taskService] Fallback fetch failed:', fallbackError);
         return [];
       }
-      
-      const fallbackGroups = fallbackData?.task_groups || [];
+
+      const fallbackGroups = (fallbackData?.task_groups || []).filter(g => !g.is_deleted);
       if (fallbackGroups.length === 0) return [];
-      
+
       // If we found groups via fallback, fetch their subtasks too
       const groupIds = fallbackGroups.map(g => g.id);
       const { data: subtasks } = await supabase
         .from('subtasks')
         .select('*')
         .in('group_id', groupIds)
+        .eq('is_deleted', false)
         .order('sort_order', { ascending: true });
-        
+
       return fallbackGroups.map(g => ({
         ...g,
         subtasks: subtasks?.filter(s => s.group_id === g.id) || []
       }));
     }
 
-    // 2. Fetch all subtasks for these groups
+    // 2. Fetch all subtasks for these groups (excluding soft-deleted)
     const groupIds = groups.map(g => g.id);
     const { data: subtasks, error: subtasksError } = await supabase
       .from('subtasks')
       .select('*')
       .in('group_id', groupIds)
+      .eq('is_deleted', false)
       .order('sort_order', { ascending: true });
 
     if (subtasksError) {
@@ -186,6 +194,47 @@ export const taskService = {
       .single();
 
     return finalTask || task;
+  },
+
+  /** Soft delete a task using is_deleted flag */
+  async deleteTask(taskId) {
+    const now = new Date().toISOString();
+
+    // 1. Soft-delete the task itself
+    const { error } = await supabase
+      .from('tasks')
+      .update({
+        is_deleted: true,
+        deleted_at: now,
+        updated_at: now,
+      })
+      .eq('id', taskId);
+
+    if (error) {
+      console.error('[taskService] Soft delete task failed:', error);
+      throw error;
+    }
+
+    // 2. Also soft-delete all child groups
+    const { data: groups } = await supabase
+      .from('task_groups')
+      .select('id')
+      .eq('task_id', taskId)
+      .eq('is_deleted', false);
+
+    if (groups && groups.length > 0) {
+      const groupIds = groups.map(g => g.id);
+      await supabase
+        .from('task_groups')
+        .update({ is_deleted: true, deleted_at: now })
+        .in('id', groupIds);
+
+      // Soft-delete all subtasks under those groups
+      await supabase
+        .from('subtasks')
+        .update({ is_deleted: true, deleted_at: now })
+        .in('group_id', groupIds);
+    }
   },
 
   /**
@@ -269,7 +318,8 @@ export const taskService = {
     const { count } = await supabase
       .from('task_groups')
       .select('*', { count: 'exact', head: true })
-      .eq('task_id', taskId);
+      .eq('task_id', taskId)
+      .eq('is_deleted', false);
 
     const { data, error } = await supabase
       .from('task_groups')
@@ -296,7 +346,8 @@ export const taskService = {
     const { count } = await supabase
       .from('subtasks')
       .select('*', { count: 'exact', head: true })
-      .eq('group_id', groupId);
+      .eq('group_id', groupId)
+      .eq('is_deleted', false);
 
     const { data, error } = await supabase
       .from('subtasks')
@@ -316,6 +367,119 @@ export const taskService = {
       .single();
     if (error) throw error;
     return data;
+  },
+
+  async updateGroup(groupId, title, description) {
+    const { data, error } = await supabase
+      .from('task_groups')
+      .update({ title, updated_at: new Date().toISOString() })
+      .eq('id', groupId)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async updateSubtask(subtaskId, title, dueDate, description) {
+    const { data, error } = await supabase
+      .from('subtasks')
+      .update({ title, due_date: dueDate, updated_at: new Date().toISOString() })
+      .eq('id', subtaskId)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  // ─────────────────────────────────────────────
+  // SOFT DELETE — GROUPS & SUBTASKS
+  // ─────────────────────────────────────────────
+
+  /**
+   * Check whether a group can be deleted.
+   * Cannot delete if any subtask is completed.
+   */
+  async canDeleteGroup(groupId) {
+    const { data: subtasks, error } = await supabase
+      .from('subtasks')
+      .select('id, is_completed')
+      .eq('group_id', groupId)
+      .eq('is_deleted', false);
+
+    if (error) {
+      console.error('[taskService] canDeleteGroup check failed:', error);
+      return { canDelete: false, reason: 'Failed to check subtask status.' };
+    }
+
+    const hasCompletedSubtask = subtasks?.some(s => s.is_completed);
+    if (hasCompletedSubtask) {
+      return {
+        canDelete: false,
+        reason: 'Cannot delete this task because one or more mini tasks are already completed.',
+      };
+    }
+    return { canDelete: true };
+  },
+
+  /**
+   * Check whether a subtask can be deleted.
+   * Cannot delete if it is completed.
+   */
+  canDeleteSubtask(subtask) {
+    if (subtask.is_completed || subtask.isCompleted) {
+      return {
+        canDelete: false,
+        reason: 'Completed mini tasks cannot be deleted.',
+      };
+    }
+    return { canDelete: true };
+  },
+
+  /**
+   * Soft delete a group and all its child subtasks.
+   */
+  async softDeleteGroup(groupId) {
+    const now = new Date().toISOString();
+
+    // 1. Soft-delete the group
+    const { error: groupError } = await supabase
+      .from('task_groups')
+      .update({ is_deleted: true, deleted_at: now })
+      .eq('id', groupId);
+
+    if (groupError) {
+      console.error('[taskService] softDeleteGroup failed:', groupError);
+      throw groupError;
+    }
+
+    // 2. Soft-delete all child subtasks
+    const { error: subError } = await supabase
+      .from('subtasks')
+      .update({ is_deleted: true, deleted_at: now })
+      .eq('group_id', groupId)
+      .eq('is_deleted', false);
+
+    if (subError) {
+      console.error('[taskService] softDeleteGroup subtasks failed:', subError);
+      throw subError;
+    }
+  },
+
+  /**
+   * Soft delete a single subtask.
+   */
+  async softDeleteSubtask(subtaskId) {
+    const now = new Date().toISOString();
+
+    const { error } = await supabase
+      .from('subtasks')
+      .update({ is_deleted: true, deleted_at: now })
+      .eq('id', subtaskId);
+
+    if (error) {
+      console.error('[taskService] softDeleteSubtask failed:', error);
+      throw error;
+    }
   },
 
   // ─────────────────────────────────────────────
@@ -358,21 +522,39 @@ export const taskService = {
   // ─────────────────────────────────────────────
 
   async updateTaskOrder(orderedIds) {
-    const updates = orderedIds.map((id, idx) => ({ id, sort_order: idx }));
-    const { error } = await supabase.from('tasks').upsert(updates);
-    if (error) throw error;
+    const promises = orderedIds.map((id, idx) =>
+      supabase.from('tasks').update({ sort_order: idx }).eq('id', id)
+    );
+    const results = await Promise.all(promises);
+    const failed = results.find(r => r.error);
+    if (failed?.error) {
+      console.error('[taskService] updateTaskOrder failed:', failed.error);
+      throw failed.error;
+    }
   },
 
   async updateGroupOrder(orderedIds) {
-    const updates = orderedIds.map((id, idx) => ({ id, sort_order: idx }));
-    const { error } = await supabase.from('task_groups').upsert(updates);
-    if (error) throw error;
+    const promises = orderedIds.map((id, idx) =>
+      supabase.from('task_groups').update({ sort_order: idx }).eq('id', id)
+    );
+    const results = await Promise.all(promises);
+    const failed = results.find(r => r.error);
+    if (failed?.error) {
+      console.error('[taskService] updateGroupOrder failed:', failed.error);
+      throw failed.error;
+    }
   },
 
   async updateSubtaskOrder(orderedIds) {
-    const updates = orderedIds.map((id, idx) => ({ id, sort_order: idx }));
-    const { error } = await supabase.from('subtasks').upsert(updates);
-    if (error) throw error;
+    const promises = orderedIds.map((id, idx) =>
+      supabase.from('subtasks').update({ sort_order: idx }).eq('id', id)
+    );
+    const results = await Promise.all(promises);
+    const failed = results.find(r => r.error);
+    if (failed?.error) {
+      console.error('[taskService] updateSubtaskOrder failed:', failed.error);
+      throw failed.error;
+    }
   },
 
   // ─────────────────────────────────────────────
@@ -402,13 +584,13 @@ export const taskService = {
   computeStats(tasks = []) {
     const today = new Date().toISOString().split('T')[0];
     return {
-      total:           tasks.length,
-      pending:         tasks.filter(t => t.status === 'pending').length,
-      inProgress:      tasks.filter(t => t.status === 'in_progress').length,
-      inReview:        tasks.filter(t => t.status === 'review').length,
-      done:            tasks.filter(t => t.status === 'done').length,
-      overdue:         tasks.filter(t => t.deadline && t.deadline < today && t.status !== 'done').length,
-      unacknowledged:  tasks.filter(t => !t.is_acknowledged && t.status !== 'done').length,
+      total: tasks.length,
+      pending: tasks.filter(t => t.status === 'pending').length,
+      inProgress: tasks.filter(t => t.status === 'in_progress').length,
+      inReview: tasks.filter(t => t.status === 'review').length,
+      done: tasks.filter(t => t.status === 'done').length,
+      overdue: tasks.filter(t => t.deadline && t.deadline < today && t.status !== 'done').length,
+      unacknowledged: tasks.filter(t => !t.is_acknowledged && t.status !== 'done').length,
     };
   },
 
@@ -427,7 +609,8 @@ export const taskService = {
    * Used to gate the "Submit for Review" button.
    */
   allSubtasksDone(taskGroups = []) {
-    return taskGroups.length > 0 && taskGroups.every(g => g.isCompleted ?? g.is_completed);
+    if (taskGroups.length === 0) return true;
+    return taskGroups.every(g => g.isCompleted ?? g.is_completed);
   },
 
   /**

@@ -71,7 +71,9 @@ const AdminTaskView = () => {
 
     if (!Array.isArray(source)) return [];
 
-    return source.map(g => {
+    return source
+      .filter(g => !g.is_deleted)
+      .map(g => {
       // Handle both normalized and raw structures
       const groupTitle = g.title || "Section";
       const groupIsCompleted = g.isCompleted ?? g.is_completed ?? false;
@@ -81,11 +83,15 @@ const AdminTaskView = () => {
         ...g,
         title: groupTitle,
         isCompleted: groupIsCompleted,
-        items: Array.isArray(subtasks) ? subtasks.map(s => ({
+        items: Array.isArray(subtasks) ? subtasks
+          .filter(s => !s.is_deleted)
+          .map(s => ({
           ...s,
           isCompleted: s.isCompleted ?? s.is_completed ?? false,
-          date: s.date || (s.due_date ? new Date(s.due_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '-'),
-          updatedTime: s.updated_at ? new Date(s.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null,
+          date: s.date || (s.due_date 
+            ? new Date(s.due_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) 
+            : s.updated_at ? new Date(s.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '-'),
+          updatedTime: s.updated_at ? new Intl.DateTimeFormat('en-US', { day: 'numeric', month: 'short', hour: 'numeric', minute: 'numeric' }).format(new Date(s.updated_at)) : null,
         })).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.id.localeCompare(b.id)) : []
       };
     }).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.id.localeCompare(b.id));
@@ -921,8 +927,7 @@ const AdminTaskView = () => {
                         <tr className="border-b border-slate-100">
                           <th className="px-8 py-4 text-[9px] font-bold text-slate-400 uppercase tracking-widest text-center w-20">#</th>
                           <th className="px-6 py-4 text-[9px] font-bold text-slate-400 uppercase tracking-widest">Task Description</th>
-                          <th className="px-6 py-4 text-[9px] font-bold text-slate-400 uppercase tracking-widest text-center w-48">Due Date</th>
-                          <th className="px-6 py-4 text-[9px] font-bold text-slate-400 uppercase tracking-widest text-center w-48">Updated At</th>
+                          <th className="px-6 py-4 text-[9px] font-bold text-slate-400 uppercase tracking-widest text-center w-56">Updated At</th>
                           <th className="px-6 py-4 text-[9px] font-bold text-slate-400 uppercase tracking-widest text-center w-32">Status</th>
                         </tr>
                       </thead>
@@ -949,12 +954,13 @@ const AdminTaskView = () => {
                                 <td className="px-6 py-2 pl-12 border-l-2 border-slate-100 ml-4">
                                   <span className={`text-[13px] font-medium ${item.isCompleted ? 'text-slate-400 line-through' : 'text-slate-600'}`}>{item.title}</span>
                                 </td>
-                                <td className="px-6 py-2 text-center text-[10px] font-bold text-slate-400">{item.date || '-'}</td>
                                 <td className="px-6 py-2 text-center">
-                                  {item.isCompleted && item.updatedTime && (
+                                  {item.updatedTime ? (
                                     <div className="flex items-center justify-center gap-1.5 text-[10px] font-black text-indigo-400">
                                       <History size={11} /> {item.updatedTime}
                                     </div>
+                                  ) : (
+                                    <span className="text-[10px] font-bold text-slate-400">-</span>
                                   )}
                                 </td>
                                 <td className="px-6 py-2 text-center">

@@ -185,12 +185,11 @@ const Attendance = () => {
       </div>
 
       {/* Modern KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
         {[
           { label: 'Present Employees', value: stats.present, icon: UserCheck, color: 'emerald', trend: '+12% from yesterday' },
           { label: 'Late Employees', value: stats.late, icon: Clock, color: 'amber', trend: '-2% from yesterday' },
           { label: 'On Leave', value: stats.onLeave, icon: Plane, color: 'indigo', trend: 'Stable' },
-          { label: 'Working Remotely', value: stats.remote, icon: MapPin, color: 'blue', trend: '+5% this week' },
         ].map((kpi, i) => (
           <div key={i} className="group bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
             <div className="flex items-start justify-between mb-4">

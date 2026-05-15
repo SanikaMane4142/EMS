@@ -219,6 +219,7 @@ const HRDashboard = () => {
                   <th>Designation</th>
                   <th style={{ textAlign: 'center' }}>Punch In</th>
                   <th style={{ textAlign: 'center' }}>Punch Out</th>
+                  <th style={{ textAlign: 'center' }}>Lunch</th>
                   <th style={{ textAlign: 'center' }}>Overtime</th>
                   <th style={{ textAlign: 'right' }}>Status</th>
                 </tr>
@@ -245,6 +246,9 @@ const HRDashboard = () => {
                     <td className="text-sm font-medium text-center">{row.punchIn}</td>
                     <td className="text-sm font-medium text-center">
                       {row.punchOut === '-' ? <span className="text-amber-500 font-semibold">Active</span> : row.punchOut}
+                    </td>
+                    <td className="text-sm font-medium text-center text-slate-500">
+                      {row.lunchDuration > 0 ? `${row.lunchDuration}m` : '-'}
                     </td>
                     <td className="text-sm font-bold text-center text-indigo-600">
                       {row.overtime > 0 ? `${row.overtime}h` : '-'}

@@ -479,6 +479,17 @@ CREATE POLICY "attendance_self_all" ON public.attendance FOR ALL    TO authentic
 DROP POLICY IF EXISTS "attendance_hr_view" ON public.attendance;
 CREATE POLICY "attendance_hr_view"  ON public.attendance FOR SELECT TO authenticated USING (get_my_role() IN ('hr', 'admin', 'super_admin'));
 
+DROP POLICY IF EXISTS "attendance_department_view" ON public.attendance;
+CREATE POLICY "attendance_department_view" ON public.attendance FOR SELECT TO authenticated
+USING (
+  EXISTS (
+    SELECT 1 FROM public.profiles p1
+    JOIN public.profiles p2 ON p1.department_id = p2.department_id
+    WHERE p1.id = attendance.user_id
+    AND p2.id = auth.uid()
+  )
+);
+
 
 -- -----------------------------------------------------------------------------
 -- 5.4  LEAVE REQUESTS
@@ -756,5 +767,29 @@ ON task_activity_logs FOR INSERT WITH CHECK (true);
 -- =============================================================================
 -- SECTION 9: SCHEMA CACHE REFRESH
 -- =============================================================================
+NOTIFY pgrst, 'reload schema';
+
+-- =============================================================================
+-- SECTION 10: reorder tasks
+-- =============================================================================
+
+-- 1. Add is_deleted and deleted_at to tasks
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+
+-- 2. Add is_deleted and deleted_at to task_groups
+ALTER TABLE public.task_groups ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.task_groups ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+
+-- 3. Add is_deleted and deleted_at to subtasks
+ALTER TABLE public.subtasks ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.subtasks ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+
+-- 4. Backfill existing [DELETED]-tagged tasks
+UPDATE public.tasks
+SET is_deleted = TRUE, deleted_at = NOW()
+WHERE title LIKE '[DELETED]%' AND is_deleted = FALSE;
+
+-- 5. Refresh PostgREST schema cache
 NOTIFY pgrst, 'reload schema';
 

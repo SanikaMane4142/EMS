@@ -67,6 +67,15 @@ export const useCreateTask = () => {
   });
 };
 
+/** Delete a task (soft delete) */
+export const useDeleteTask = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (taskId) => taskService.deleteTask(taskId),
+    onSuccess: () => invalidateAll(qc),
+  });
+};
+
 /** Generic task update (status, progress, etc.) */
 export const useUpdateTask = () => {
   const qc = useQueryClient();
@@ -168,6 +177,26 @@ export const useAddSubtask = () => {
   });
 };
 
+/** Update a group */
+export const useUpdateGroup = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ groupId, title, description }) =>
+      taskService.updateGroup(groupId, title, description),
+    onSuccess: () => invalidateAll(qc),
+  });
+};
+
+/** Update a subtask */
+export const useUpdateSubtask = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ subtaskId, title, dueDate, description }) =>
+      taskService.updateSubtask(subtaskId, title, dueDate, description),
+    onSuccess: () => invalidateAll(qc),
+  });
+};
+
 /** Reorder top-level tasks */
 export const useUpdateTaskOrder = () => {
   const qc = useQueryClient();
@@ -191,6 +220,24 @@ export const useUpdateSubtaskOrder = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (orderedIds) => taskService.updateSubtaskOrder(orderedIds),
+    onSuccess: () => invalidateAll(qc),
+  });
+};
+
+/** Soft delete a task group + its subtasks */
+export const useSoftDeleteGroup = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (groupId) => taskService.softDeleteGroup(groupId),
+    onSuccess: () => invalidateAll(qc),
+  });
+};
+
+/** Soft delete a single subtask */
+export const useSoftDeleteSubtask = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (subtaskId) => taskService.softDeleteSubtask(subtaskId),
     onSuccess: () => invalidateAll(qc),
   });
 };

@@ -315,7 +315,7 @@ export const attendanceService = {
     if (startDate && endDate) {
       query = query.gte('attendance_date', startDate).lte('attendance_date', endDate);
     } else {
-      const targetDate = date || getTodayIST();
+      const targetDate = date || await getTodayIST();
       query = query.eq('attendance_date', targetDate);
     }
 

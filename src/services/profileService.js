@@ -96,14 +96,24 @@ export const profileService = {
    */
   async getDepartmentMembers(departmentId) {
     if (!departmentId) return [];
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, full_name, email, designation, avatar_url, role')
+      .select(`
+        id, full_name, email, designation, avatar_url, role,
+        attendance(status, attendance_date)
+      `)
       .eq('department_id', departmentId)
-      .eq('status', 'active');
+      .eq('status', 'active')
+      .eq('attendance.attendance_date', today);
 
     if (error) throw error;
-    return data || [];
+
+    return (data || []).map(member => ({
+      ...member,
+      is_online: member.attendance && member.attendance.length > 0 && member.attendance[0].status === 'punched_in'
+    }));
   },
 
   /**

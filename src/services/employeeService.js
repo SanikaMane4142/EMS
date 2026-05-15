@@ -5,7 +5,10 @@ export const employeeService = {
    * Fetch all employees with department details
    */
   async getAll() {
-    const { data, error } = await supabase
+    const year = new Date().getFullYear();
+    
+    // 1. Fetch profiles
+    const { data: profiles, error } = await supabase
       .from('profiles')
       .select(`
         *,
@@ -15,7 +18,24 @@ export const employeeService = {
       .order('full_name');
 
     if (error) throw error;
-    return data;
+    
+    if (!profiles || profiles.length === 0) return [];
+
+    // 2. Fetch leave balances for all active users
+    const userIds = profiles.map(p => p.id);
+    const { data: balances, error: balancesError } = await supabase
+      .from('leave_balances')
+      .select('*')
+      .eq('year', year)
+      .in('user_id', userIds);
+      
+    if (balancesError) throw balancesError;
+
+    // 3. Map balances to profiles
+    return profiles.map(emp => ({
+      ...emp,
+      leave_balances: balances?.find(lb => lb.user_id === emp.id) || null
+    }));
   },
 
   /**

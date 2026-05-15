@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from "react";
+import React, { useState, useRef, useMemo, useEffect } from "react";
 import { 
   X, Calendar, User, Tag, AlertCircle, Type, FileText, 
   Loader2, Plus, Trash2, CheckCircle2, ChevronRight, 
@@ -19,7 +19,7 @@ const PRIORITY_OPTS = [
   { label: "Critical", color: "text-red-600", bg: "bg-red-50", border: "border-red-100", icon: AlertCircle }
 ];
 
-const CreateTaskModal = ({ open, onClose, onCreate, isSubmitting = false }) => {
+const CreateTaskModal = ({ open, onClose, onCreate, initialData = null, isSubmitting = false }) => {
   const { user } = useAuth();
   const { data: employees = [], isLoading: loadingEmployees } = useEmployees();
   const subtaskInputRef = useRef(null);
@@ -35,6 +35,22 @@ const CreateTaskModal = ({ open, onClose, onCreate, isSubmitting = false }) => {
     description: "",
     subtasks: []
   });
+
+  // Populate form if initialData is provided
+  useEffect(() => {
+    if (initialData) {
+      setFormData({
+        title: initialData.title || "",
+        projectName: initialData.project_name || "",
+        assignedTo: initialData.assigned_to || "",
+        deadline: initialData.deadline || "",
+        priority: initialData.priority || "Medium",
+        description: initialData.description || "",
+        subtasks: [] // Subtasks are handled differently in this app (groups), but we keep this for consistency
+      });
+      setStep(1); // Go straight to form
+    }
+  }, [initialData]);
 
   const [newSubtask, setNewSubtask] = useState("");
 
@@ -80,10 +96,11 @@ const CreateTaskModal = ({ open, onClose, onCreate, isSubmitting = false }) => {
     if (!formData.title.trim() || !formData.assignedTo) return;
     onCreate({
       ...formData,
+      id: initialData?.id, // Pass ID if editing
       title: formData.title.trim(),
       projectName: formData.projectName.trim() || null,
       description: formData.description.trim() || null,
-      assignedBy: user.id,
+      assignedBy: initialData?.assigned_by || user.id,
     });
   };
 
@@ -130,11 +147,11 @@ const CreateTaskModal = ({ open, onClose, onCreate, isSubmitting = false }) => {
               )}
               <div>
                 <h2 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
-                  {step === 0 ? "Assignment Mode" : "Task Details"}
+                  {initialData ? "Edit Task" : step === 0 ? "Assignment Mode" : "Task Details"}
                   <Sparkles size={20} className="text-indigo-500 animate-pulse" />
                 </h2>
                 <p className="text-sm font-medium text-slate-500">
-                  {step === 0 ? "Who are you creating this task for?" : "Configure your task requirements"}
+                  {initialData ? "Update your task configurations" : step === 0 ? "Who are you creating this task for?" : "Configure your task requirements"}
                 </p>
               </div>
             </div>
@@ -434,7 +451,7 @@ const CreateTaskModal = ({ open, onClose, onCreate, isSubmitting = false }) => {
                 ) : (
                   <>
                     <CheckCircle2 size={18} />
-                    <span>Launch Task</span>
+                    <span>{initialData ? "Update Task" : "Launch Task"}</span>
                   </>
                 )}
               </button>

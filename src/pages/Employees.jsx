@@ -122,6 +122,37 @@ const Employees = () => {
       renderCell: (params) => <span className="text-sm text-slate-500 font-medium">{params.value}</span>
     },
     {
+      field: 'leave_accommodations',
+      headerName: 'Leaves',
+      flex: 1.5,
+      minWidth: 160,
+      sortable: false,
+      renderCell: (params) => {
+        const lb = params.row.leave_balances;
+        // Default company policy if DB record hasn't been lazily initialized yet
+        const clAvail = (lb?.cl_total ?? 20) - (lb?.cl_used ?? 0);
+        const slAvail = (lb?.sl_total ?? 6) - (lb?.sl_used ?? 0);
+        const olAvail = (lb?.ol_total ?? 2) - (lb?.ol_used ?? 0);
+
+        return (
+          <div className="flex gap-2 h-full items-center">
+            <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-50 border border-slate-100">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">CL</span>
+              <span className="text-[12px] font-black text-slate-700">{clAvail}</span>
+            </div>
+            <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-50 border border-slate-100">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">ML</span>
+              <span className="text-[12px] font-black text-slate-700">{slAvail}</span>
+            </div>
+            <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-50 border border-slate-100">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">OL</span>
+              <span className="text-[12px] font-black text-slate-700">{olAvail}</span>
+            </div>
+          </div>
+        );
+      }
+    },
+    {
       field: 'status',
       headerName: 'Status',
       width: 120,

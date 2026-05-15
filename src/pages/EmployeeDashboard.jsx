@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import Swal from 'sweetalert2';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Box, Avatar, Chip, Skeleton, Modal, TextField, Typography, Button } from '@mui/material';
@@ -134,8 +135,23 @@ const EmployeeDashboard = () => {
       })
       .subscribe();
 
+    // Realtime subscription for team status (attendance changes)
+    const teamChannel = supabase
+      .channel('team_status')
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'attendance' 
+      }, () => {
+        if (profile?.department_id) {
+          profileService.getDepartmentMembers(profile.department_id).then(setTeamMembers);
+        }
+      })
+      .subscribe();
+
     return () => {
       supabase.removeChannel(channel);
+      supabase.removeChannel(teamChannel);
     };
   }, [profile?.id, profile?.department_id]);
 
@@ -234,9 +250,30 @@ const EmployeeDashboard = () => {
       setActionLoading(false);
     }
   };
-
   const handlePunchOut = async () => {
     if (!record?.id) return;
+
+    const result = await Swal.fire({
+      title: 'Ready to Punch Out?',
+      text: "You are about to end your shift for today. Make sure you've submitted your daily report!",
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#ef4444',
+      cancelButtonColor: '#64748b',
+      confirmButtonText: 'Yes, Punch Out',
+      cancelButtonText: 'Not yet',
+      background: '#ffffff',
+      borderRadius: '24px',
+      customClass: {
+        title: 'text-xl font-black text-slate-900',
+        htmlContainer: 'text-sm font-medium text-slate-500',
+        confirmButton: 'rounded-xl px-6 py-3 text-sm font-bold',
+        cancelButton: 'rounded-xl px-6 py-3 text-sm font-bold'
+      }
+    });
+
+    if (!result.isConfirmed) return;
+
     try {
       setActionLoading(true);
       await punchOutMutation.mutateAsync({
@@ -244,8 +281,14 @@ const EmployeeDashboard = () => {
         punchInTime: record.punch_in_time,
         lunchDurationMs: record.lunch_duration_ms || 0
       });
+      toast.success('Punched out successfully!');
     } catch (err) {
-      alert('Punch-out failed: ' + err.message);
+      Swal.fire({
+        title: 'Error',
+        text: 'Punch-out failed: ' + err.message,
+        icon: 'error',
+        confirmButtonColor: '#4f46e5'
+      });
     } finally {
       setActionLoading(false);
     }
@@ -348,19 +391,47 @@ const EmployeeDashboard = () => {
     try {
       setActionLoading(true);
       const myTasks = await taskService.getMyTasks(user.id);
-      // Only include tasks assigned to me by someone else that are currently "In Progress"
-      const inProgressTasks = myTasks.filter(t =>
-        t.status === 'in_progress' &&
+
+      // Today's date boundary (midnight to midnight, local time)
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const todayEnd = new Date();
+      todayEnd.setHours(23, 59, 59, 999);
+
+      const isToday = (dateStr) => {
+        if (!dateStr) return false;
+        const d = new Date(dateStr);
+        return d >= todayStart && d <= todayEnd;
+      };
+
+      // ── IMPROVEMENT 1: Include ALL assigned tasks (including self-assigned)
+      // ── IMPROVEMENT 2: Include tasks finished TODAY (status=done, updated today)
+      const relevantTasks = myTasks.filter(t =>
         t.assigned_to === user.id &&
-        t.assigned_by !== user.id
+        (
+          t.status === 'in_progress' ||
+          (t.status === 'done' && isToday(t.updated_at))
+        )
       );
 
       const plannedItems = [];
       const completedItems = [];
+      const wipItems = [];
 
-      inProgressTasks.forEach(task => {
-        (task.task_groups || []).forEach(group => {
-          // Rule: PLANNED - Only include subtask groups (not completed)
+      relevantTasks.forEach(task => {
+        const taskGroups = (task.task_groups || []).filter(g => !g.is_deleted);
+
+        // If the entire task was completed today, report it at the top level
+        if (task.status === 'done' && isToday(task.updated_at) && taskGroups.length === 0) {
+          completedItems.push({
+            id: task.id,
+            line: `- ${task.title} ✓`
+          });
+          return;
+        }
+
+        taskGroups.forEach(group => {
+          // PLANNED: subtask group not yet completed = planning to work on it
           if (!group.is_completed) {
             plannedItems.push({
               id: group.id,
@@ -389,8 +460,9 @@ const EmployeeDashboard = () => {
       });
 
       setReportData(prev => {
-        const PLANNED_HEADER = "Planned subtasks today:";
-        const COMPLETED_HEADER = "Completed subtasks today:";
+        const PLANNED_HEADER = "── Auto-filled: Planned Today ──";
+        const COMPLETED_HEADER = "── Auto-filled: Completed Today ──";
+        const WIP_HEADER = "── Auto-filled: In Progress ──";
 
         const stripAutoFill = (text, header) => {
           if (!text) return '';
@@ -402,23 +474,28 @@ const EmployeeDashboard = () => {
 
         const manualPlanned = stripAutoFill(prev.tasks_planned, PLANNED_HEADER);
         const manualCompleted = stripAutoFill(prev.tasks_completed, COMPLETED_HEADER);
+        const manualWip = stripAutoFill(prev.work_in_progress, WIP_HEADER);
 
         const newPlannedLines = plannedItems.map(i => i.line);
         const newCompletedLines = completedItems.map(i => i.line);
+        const newWipLines = wipItems.map(i => i.line);
         const newAutoPlannedIds = plannedItems.map(i => i.id);
         const newAutoCompletedIds = completedItems.map(i => i.id);
 
-        // 3. Construct final values
         const finalPlanned = (manualPlanned + (manualPlanned ? '\n\n' : '') +
           (newPlannedLines.length > 0 ? PLANNED_HEADER + '\n' + newPlannedLines.join('\n') : '')).trim();
 
         const finalCompleted = (manualCompleted + (manualCompleted ? '\n\n' : '') +
           (newCompletedLines.length > 0 ? COMPLETED_HEADER + '\n' + newCompletedLines.join('\n') : '')).trim();
 
+        const finalWip = (manualWip + (manualWip ? '\n\n' : '') +
+          (newWipLines.length > 0 ? WIP_HEADER + '\n' + newWipLines.join('\n') : '')).trim();
+
         return {
           ...prev,
           tasks_planned: finalPlanned,
           tasks_completed: finalCompleted,
+          work_in_progress: finalWip,
           auto_filled_planned_tasks: newAutoPlannedIds,
           auto_filled_completed_tasks: newAutoCompletedIds
         };
@@ -598,8 +675,8 @@ const EmployeeDashboard = () => {
               )}
             </div>
 
-            {/* Card 2: Lunch Break (Visible anytime during active shift) */}
-            <div className={`transition-all duration-500 ${isPunchedIn && !isCompleted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}`}>
+            {/* Card 2: Lunch Break (Visible anytime during active shift until completed) */}
+            <div className={`transition-all duration-500 ${isPunchedIn && !isCompleted && !record?.lunch_end_time ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none hidden'}`}>
               <div className="card-ems-static h-full p-6 border-l-[6px] border-amber-500" style={{ borderRadius: '18px' }}>
                 <div className="flex justify-between items-start mb-4">
                   <div>
@@ -865,7 +942,7 @@ const EmployeeDashboard = () => {
                     <p className="text-sm font-bold text-slate-900 truncate">{member.full_name}</p>
                     <p className="text-xs text-slate-500 font-medium">{member.designation || 'Member'}</p>
                   </div>
-                  <span className="status-dot online" />
+                  <span className={`status-dot ${member.is_online ? 'online' : 'offline'}`} />
                 </div>
               ))}
             </div>
