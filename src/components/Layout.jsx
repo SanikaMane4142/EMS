@@ -6,7 +6,7 @@ import {
   Badge, Tooltip, Box, Divider, useMediaQuery, useTheme, Typography
 } from '@mui/material';
 import {
-  Menu as MenuIcon, X, Bell, ChevronRight, LogOut, User, Settings, Briefcase
+  Menu as MenuIcon, X, Bell, ChevronRight, LogOut, User, Settings, Briefcase, Rocket
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { supabase } from '../lib/supabaseClient';
@@ -148,14 +148,9 @@ const Layout = ({ children }) => {
       {/* Drawer Header */}
       <Box sx={{ px: 2.5, py: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e2e8f0' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2 }}>
-          <Box sx={{
-            width: 36, height: 36, borderRadius: '10px', background: '#4f46e5',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff'
-          }}>
-            <Briefcase size={18} />
-          </Box>
+          <Box component="img" src="/logo.png" sx={{ width: 36, height: 36, borderRadius: '8px' }} alt="Logo" />
           <Typography sx={{ fontSize: '18px', fontWeight: 800, color: '#0f172a', fontFamily: 'Inter, sans-serif' }}>
-            EMS <span style={{ color: '#4f46e5' }}>Pro</span>
+            EMS <span style={{ color: '#4f46e5' }}>Cocpit</span>
           </Typography>
         </Box>
         <IconButton onClick={() => setDrawerOpen(false)} size="small" aria-label="Close menu">
@@ -277,18 +272,12 @@ const Layout = ({ children }) => {
               </IconButton>
             )}
             <Link to={profile ? getDashboardRoute(profile.role) : '/dashboard'} style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
-              <Box sx={{
-                width: 36, height: 36, borderRadius: '10px', background: '#4f46e5',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff',
-                flexShrink: 0
-              }}>
-                <Briefcase size={18} />
-              </Box>
+              <Box component="img" src="/logo.png" sx={{ width: 36, height: 36, borderRadius: '8px', flexShrink: 0 }} alt="Logo" />
               <Typography sx={{
                 fontSize: 18, fontWeight: 800, color: '#0f172a',
                 fontFamily: 'Inter, sans-serif', display: { xs: 'none', sm: 'block' }
               }}>
-                EMS <span style={{ color: '#4f46e5' }}>Pro</span>
+                EMS <span style={{ color: '#4f46e5' }}>Cocpit</span>
               </Typography>
             </Link>
           </Box>

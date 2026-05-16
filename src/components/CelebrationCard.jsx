@@ -2,22 +2,18 @@ import React, { useState, useEffect } from 'react';
 import { Gift, PartyPopper, Award, X } from 'lucide-react';
 
 const CelebrationCard = ({ celebrations = [] }) => {
-  const [isVisible, setIsVisible] = useState(true);
+  const [isVisible, setIsVisible] = useState(() => {
+    // Check if the user has permanently dismissed the celebrations banner
+    const isDismissed = localStorage.getItem('celebrations_dismissed');
+    return isDismissed !== 'true';
+  });
 
-  useEffect(() => {
-    // Check if user has already dismissed celebrations for today
-    const dismissedDate = localStorage.getItem('celebrations_dismissed_date');
-    const today = new Date().toDateString();
-    
-    if (dismissedDate === today) {
-      setIsVisible(false);
-    }
-  }, []);
+  // No longer need the useEffect since we initialize synchronously
 
   const handleDismiss = () => {
     setIsVisible(false);
-    // Persist dismissal for today
-    localStorage.setItem('celebrations_dismissed_date', new Date().toDateString());
+    // Persist dismissal permanently so it doesn't appear every day
+    localStorage.setItem('celebrations_dismissed', 'true');
   };
 
   if (!isVisible || celebrations.length === 0) return null;

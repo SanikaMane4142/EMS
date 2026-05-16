@@ -10,6 +10,21 @@ const getTodayIST = async () => {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 };
 
+/**
+ * Validates if the current device is allowed to perform attendance actions.
+ * Rejects mobile/tablet devices or screens below 768px.
+ */
+const validateDevice = () => {
+  if (typeof window === 'undefined') return; // Not in browser
+
+  const isMobileSize = window.innerWidth < 768;
+  const isMobileUA = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+  if (isMobileSize || isMobileUA) {
+    throw new Error("Punch actions are disabled on mobile devices. Please use a desktop to punch in/out.");
+  }
+};
+
 export const attendanceService = {
 
   /**
@@ -55,7 +70,8 @@ export const attendanceService = {
    * Uses IST date so the attendance_date column always matches the user's local day.
    */
   async punchIn(userId) {
-    const { data, error } = await supabase.rpc('attendance_punch_in', {
+    validateDevice();
+    const { data, error } = await supabase.rpc('attendance_punch_in_v2', {
       p_user_id: userId,
     });
 
@@ -66,10 +82,39 @@ export const attendanceService = {
 
   /**
    * Punch Out — updates the record and calculates total hours.
-   * Capped at 8 hours automatically if the duration exceeds it.
+   *
+   * When isAutoPunchOut = true (triggered at 8h30m by the frontend timer):
+   *   - punch_out_time is set to exactly punch_in_time + 8h30m
+   *   - total_hours is capped at 8 (regular paid hours)
+   *   - status is set to 'auto_punched_out'
+   *
+   * Otherwise the existing RPC handles the standard manual punch-out.
    */
-  async punchOut(recordId, punchInTime, lunchDurationMs = 0) {
-    const { data, error } = await supabase.rpc('attendance_punch_out', {
+  async punchOut(recordId, punchInTime, lunchDurationMs = 0, isAutoPunchOut = false) {
+    if (!isAutoPunchOut) validateDevice();
+    if (isAutoPunchOut) {
+      // Auto punch-out: punch_out_time = punch_in_time + 8h30m, total_hours = 8
+      const AUTO_SHIFT_MS = 8.5 * 60 * 60 * 1000; // 8h30m in ms
+      const punchOutTime = new Date(new Date(punchInTime).getTime() + AUTO_SHIFT_MS);
+
+      const { data, error } = await supabase
+        .from('attendance')
+        .update({
+          punch_out_time: punchOutTime.toISOString(),
+          total_hours: 8,          // Regular paid hours only — NOT 8.5
+          status: 'auto_punched_out',
+        })
+        .eq('id', recordId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      console.log('[Attendance] Auto punch-out complete. punch_out_time:', punchOutTime.toISOString(), '| total_hours: 8');
+      return data;
+    }
+
+    // Manual punch-out — use server-side RPC
+    const { data, error } = await supabase.rpc('attendance_punch_out_v2', {
       p_record_id: recordId,
       p_lunch_duration_ms: lunchDurationMs || 0,
     });
@@ -83,12 +128,21 @@ export const attendanceService = {
    * Start Lunch Break — marks the start of a lunch break.
    */
   async startLunchBreak(recordId) {
+    validateDevice();
+    const now = new Date().toISOString();
     const { data, error } = await supabase.rpc('attendance_start_lunch_break', {
       p_record_id: recordId,
     });
 
     if (error) throw error;
-    console.log('[Attendance] Started lunch break using server time');
+
+    // Manually ensure lunch_start_time is recorded for tooltip/history
+    await supabase.from('attendance').update({ 
+      lunch_start_time: now,
+      lunch_end_time: null 
+    }).eq('id', recordId);
+
+    console.log('[Attendance] Started lunch break and preserved start time');
     return data;
   },
 
@@ -96,6 +150,8 @@ export const attendanceService = {
    * End Lunch Break — calculates duration and updates record.
    */
   async endLunchBreak(recordId, lunchStartTime, currentDurationMs = 0, delayReason = null) {
+    validateDevice();
+    const now = new Date().toISOString();
     const { data, error } = await supabase.rpc('attendance_end_lunch_break', {
       p_record_id: recordId,
       p_current_duration_ms: currentDurationMs || 0,
@@ -103,7 +159,14 @@ export const attendanceService = {
     });
 
     if (error) throw error;
-    console.log('[Attendance] Ended lunch break using server time');
+
+    // Manually restore lunch_start_time and set lunch_end_time
+    await supabase.from('attendance').update({
+      lunch_start_time: lunchStartTime,
+      lunch_end_time: now
+    }).eq('id', recordId);
+
+    console.log('[Attendance] Ended lunch break and preserved timestamps');
     return data;
   },
 
@@ -111,18 +174,13 @@ export const attendanceService = {
    * Start Overtime — marks the start of overtime.
    */
   async startOvertime(recordId) {
-    const now = new Date();
-    const { data, error } = await supabase
-      .from('attendance')
-      .update({
-        overtime_start_time: now.toISOString(),
-      })
-      .eq('id', recordId)
-      .select()
-      .single();
+    validateDevice();
+    const { data, error } = await supabase.rpc('attendance_start_overtime_v2', {
+      p_record_id: recordId
+    });
 
     if (error) throw error;
-    console.log('[Attendance] Started overtime at', now.toISOString());
+    console.log('[Attendance] Started overtime using secure RPC');
     return data;
   },
 
@@ -130,21 +188,13 @@ export const attendanceService = {
    * End Overtime — calculates duration and updates record.
    */
   async endOvertime(recordId, overtimeStartTime) {
-    const now = new Date();
-    const durationMs = now - new Date(overtimeStartTime);
-
-    const { data, error } = await supabase
-      .from('attendance')
-      .update({
-        overtime_end_time: now.toISOString(),
-        overtime_duration_ms: durationMs,
-      })
-      .eq('id', recordId)
-      .select()
-      .single();
+    validateDevice();
+    const { data, error } = await supabase.rpc('attendance_end_overtime_v2', {
+      p_record_id: recordId
+    });
 
     if (error) throw error;
-    console.log('[Attendance] Ended overtime. Duration MS:', durationMs);
+    console.log('[Attendance] Ended overtime using secure RPC');
     return data;
   },
 
@@ -234,8 +284,8 @@ export const attendanceService = {
   /**
    * [HR/ADMIN] Get today's attendance statistics using IST date.
    */
-  async getTodayStats() {
-    const today = await getTodayIST();
+  async getTodayStats(date = null) {
+    const today = date || await getTodayIST();
 
     const { data, error } = await supabase
       .from('attendance')
@@ -294,7 +344,7 @@ export const attendanceService = {
       .from('attendance')
       .select(`
         *,
-        profiles!user_id (
+        profiles!attendance_profiles_user_id_fkey (
           id,
           full_name,
           email,
@@ -371,6 +421,8 @@ export const attendanceService = {
                       : 'Absent',
         absenceExplanation: item.attendance_explanations?.[0] || null,
         lunchDuration: lunchMin,
+        lunchStart: item.lunch_start_time ? new Date(item.lunch_start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null,
+        lunchEnd: item.lunch_end_time ? new Date(item.lunch_end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null,
         totalHours: item.total_hours || 0,
         overtime: item.overtime_duration_ms ? parseFloat((item.overtime_duration_ms / 3600000).toFixed(2)) : 0
       };
@@ -410,5 +462,11 @@ export const attendanceService = {
       avgHours,
       presentDays
     };
+  },
+
+  async checkIpValidity() {
+    const { data, error } = await supabase.rpc('check_ip_validity');
+    if (error) throw error;
+    return data;
   }
 };

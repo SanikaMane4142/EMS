@@ -1,5 +1,5 @@
 import React from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -7,19 +7,26 @@ import { canAccess, getDashboardRoute } from '../utils/roleHelpers';
 
 const ProtectedRoute = ({ children, allowedRoles }) => {
   const { user, profile, loading } = useAuth();
+  const location = useLocation();
 
-  if (loading) {
+  // Show spinner while:
+  // 1. Auth is still initializing (loading=true), OR
+  // 2. User session exists but profile hasn't finished loading yet
+  //    (race condition: onAuthStateChange sets loading=false before
+  //     verifyAndFetchProfile completes — without this guard the login
+  //     page flashes for a split second on every refresh)
+  if (loading || (user && !profile)) {
     return <LoadingSpinner fullPage message="Verifying security credentials..." />;
   }
 
-  // No active session? Go to login.
+  // No active session? Go to login, preserving the intended destination.
   if (!user) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // Profile not found? Something went wrong with DB.
+  // Profile confirmed missing in DB — redirect to login.
   if (!profile) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
   // Check permissions using the database role

@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, Users, Clock, CalendarOff, FileText, Building,
-  DollarSign, BarChart3, Shield, Briefcase, User, CheckSquare, ListTodo
+  DollarSign, BarChart3, Shield, Briefcase, User, CheckSquare, ListTodo, Globe
 } from 'lucide-react';
 
 // ===== Role Display Mapping =====
@@ -120,6 +120,12 @@ export const getNavLinks = (dbRole) => {
       label: 'Users',
       roles: ['super_admin'],
     },
+    {
+      to: '/ip-management',
+      icon: Globe,
+      label: 'Network Security',
+      roles: ['super_admin', 'hr'],
+    },
 
 
   ];
@@ -150,6 +156,7 @@ export const getPageTitle = (pathname) => {
     '/my-calendar': 'Calendar',
     '/my-analytics': 'Performance Analytics',
     '/chat': 'Messages',
+    '/ip-management': 'Network Security',
   };
 
   if (pathname.includes('/employee/')) return 'Employee Profile';
@@ -186,6 +193,7 @@ export const getBreadcrumbs = (pathname, dbRole) => {
     'my-calendar': 'Calendar',
     'my-analytics': 'Performance',
     'chat': 'Messages',
+    'ip-management': 'Security',
   };
 
   let currentPath = '';

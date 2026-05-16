@@ -6,7 +6,7 @@ import {
   AlertTriangle, X, Eye, Calendar, ListTodo, History, Check, MessageCircle,
   ArrowLeft, Info, MessageSquare, ExternalLink, Activity, ChevronRight
 } from "lucide-react";
-import { Box, Chip, Avatar, Skeleton, Tooltip, Dialog, IconButton, CircularProgress } from '@mui/material';
+import { Box, Chip, Avatar, Skeleton, Tooltip, Dialog, IconButton, CircularProgress, Menu, MenuItem } from '@mui/material';
 import PageHeader from '../components/PageHeader';
 import { useAllTasks, useTaskComments, useTaskActivityLog, useTaskDetails, useTaskSubtasks, useUpdateTask, useAddComment } from '../hooks/useTasks';
 import { useEmployees } from '../hooks/useEmployees';
@@ -25,10 +25,85 @@ const PRIORITY_COLORS = {
   Low: { bg: '#f0fdf4', text: '#16a34a', border: '#bbf7d0' },
 };
 
+const PremiumFilter = ({ label, value, options, icon: Icon, onChange, active }) => {
+  const [anchorEl, setAnchorEl] = React.useState(null);
+  const open = Boolean(anchorEl);
+  const handleClick = (event) => setAnchorEl(event.currentTarget);
+  const handleClose = () => setAnchorEl(null);
+  const handleSelect = (val) => {
+    onChange(val);
+    handleClose();
+  };
+
+  return (
+    <div className="relative">
+      <div 
+        onClick={handleClick}
+        className={`flex items-center gap-2.5 px-3.5 h-10 border rounded-xl transition-all duration-300 cursor-pointer select-none ${
+          active ? 'bg-white border-indigo-200 shadow-[0_0_15px_rgba(79,70,229,0.08)]' : 'bg-slate-50/50 border-slate-100 hover:border-indigo-100 hover:bg-white hover:shadow-sm'
+        }`}
+      >
+        <div className={`w-6 h-6 rounded-lg flex items-center justify-center transition-colors ${active ? 'bg-indigo-50 text-indigo-600' : 'bg-white text-slate-400'}`}>
+          <Icon size={13} strokeWidth={2.5} />
+        </div>
+        <div className="flex flex-col">
+          <span className="text-[11px] font-black uppercase tracking-widest text-slate-700 leading-none">
+            {value === 'All' ? `All ${label}s` : value}
+          </span>
+        </div>
+        <ChevronDown size={14} className={`text-slate-300 transition-transform duration-300 ml-1 ${open ? 'rotate-180' : ''}`} />
+      </div>
+      <Menu
+        anchorEl={anchorEl}
+        open={open}
+        onClose={handleClose}
+        TransitionProps={{ timeout: 300 }}
+        slotProps={{
+          paper: {
+            sx: {
+              mt: 1,
+              borderRadius: '20px',
+              minWidth: 220,
+              bgcolor: 'rgba(255, 255, 255, 0.98)',
+              backdropFilter: 'blur(10px)',
+              boxShadow: '0 20px 50px rgba(15, 23, 42, 0.12)',
+              border: '1px solid rgba(0,0,0,0.04)',
+              padding: '6px',
+              '& .MuiMenuItem-root': {
+                fontSize: '11px',
+                fontWeight: 800,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                borderRadius: '12px',
+                margin: '2px 0',
+                padding: '10px 14px',
+                color: '#64748b',
+                transition: 'all 0.2s',
+                '&:hover': { bgcolor: '#F8FAFC', color: '#4F46E5', transform: 'translateX(4px)' },
+                '&.Mui-selected': { bgcolor: '#EEF2FF', color: '#4F46E5', fontWeight: 900, '&:hover': { bgcolor: '#EEF2FF' } },
+              }
+            }
+          }
+        }}
+      >
+        <MenuItem selected={value === 'All'} onClick={() => handleSelect('All')}>
+          All {label}s
+        </MenuItem>
+        {options.map((opt) => (
+          <MenuItem key={opt} selected={value === opt} onClick={() => handleSelect(opt)}>
+            {opt}
+          </MenuItem>
+        ))}
+      </Menu>
+    </div>
+  );
+};
+
 const AdminTaskView = () => {
   const navigate = useNavigate();
   const [filterDept, setFilterDept] = useState("All");
   const [filterPriority, setFilterPriority] = useState("All");
+  const [filterStatus, setFilterStatus] = useState("All");
   const [activeStatusFilter, setActiveStatusFilter] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [showAllEmployees, setShowAllEmployees] = useState(false);
@@ -145,21 +220,29 @@ const AdminTaskView = () => {
       const matchDept = filterDept === "All" || t.departmentName === filterDept;
       // Priority filter
       const matchPriority = filterPriority === "All" || t.priority === filterPriority;
-      // Status card filter
-      let matchStatus = true;
-      if (activeStatusFilter === 'in_progress') matchStatus = t.status === 'in_progress';
-      else if (activeStatusFilter === 'review') matchStatus = t.status === 'review';
-      else if (activeStatusFilter === 'overdue') matchStatus = t.deadline && t.deadline < today && t.status !== 'done';
-      else if (activeStatusFilter === 'total') matchStatus = true; // show all
+      // Status filter (Dropdown)
+      const matchStatusDropdown = filterStatus === "All" || 
+        (filterStatus === "Completed" ? t.status === "done" : 
+         filterStatus === "In Review" ? t.status === "review" :
+         t.status === filterStatus.toLowerCase().replace(" ", "_"));
+      
+      // Status card filter (KPI cards)
+      let matchStatusCard = true;
+      if (activeStatusFilter === 'in_progress') matchStatusCard = t.status === 'in_progress';
+      else if (activeStatusFilter === 'review') matchStatusCard = t.status === 'review';
+      else if (activeStatusFilter === 'overdue') matchStatusCard = t.deadline && t.deadline < today && t.status !== 'done';
+      else if (activeStatusFilter === 'total') matchStatusCard = true; // show all
+      
       // Search
       const q = searchQuery.toLowerCase();
       const matchSearch = !q ||
         t.title?.toLowerCase().includes(q) ||
         t.assignedToName?.toLowerCase().includes(q) ||
         t.project_name?.toLowerCase().includes(q);
-      return matchDept && matchPriority && matchStatus && matchSearch;
+      
+      return matchDept && matchPriority && matchStatusDropdown && matchStatusCard && matchSearch;
     });
-  }, [tasks, filterDept, filterPriority, activeStatusFilter, searchQuery]);
+  }, [tasks, filterDept, filterPriority, filterStatus, activeStatusFilter, searchQuery]);
 
   // ── Team Performance Calculation (Dynamic Analytics) ──
   const teamLoad = useMemo(() => {
@@ -253,6 +336,7 @@ const AdminTaskView = () => {
   const activeFilterCount = [
     filterDept !== 'All',
     filterPriority !== 'All',
+    filterStatus !== 'All',
     activeStatusFilter !== null,
     searchQuery !== '',
   ].filter(Boolean).length;
@@ -260,6 +344,7 @@ const AdminTaskView = () => {
   const clearAllFilters = () => {
     setFilterDept('All');
     setFilterPriority('All');
+    setFilterStatus('All');
     setActiveStatusFilter(null);
     setSearchQuery('');
   };
@@ -412,50 +497,7 @@ const AdminTaskView = () => {
       <div className="flex flex-col md:flex-row gap-6">
         {/* ── Left Column - Filters & Active Load ── */}
         <div className="w-full md:w-64 flex flex-col gap-6">
-          {/* Filters Box */}
-          <Box className="card-ems-static p-6 border border-slate-100">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">
-                <Filter size={16} className="text-indigo-600" /> Filters
-              </h3>
-              {activeFilterCount > 0 && (
-                <button
-                  onClick={clearAllFilters}
-                  className="text-[9px] font-bold text-red-500 uppercase tracking-wider flex items-center gap-1 hover:text-red-700 transition-colors"
-                >
-                  <X size={10} /> Clear ({activeFilterCount})
-                </button>
-              )}
-            </div>
 
-            <div className="flex flex-col gap-4">
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Department</label>
-                <select
-                  className="form-select-ems text-xs font-bold"
-                  value={filterDept}
-                  onChange={(e) => setFilterDept(e.target.value)}
-                >
-                  {depts.map(d => <option key={d} value={d}>{d}</option>)}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Priority</label>
-                <select
-                  className="form-select-ems text-xs font-bold"
-                  value={filterPriority}
-                  onChange={(e) => setFilterPriority(e.target.value)}
-                >
-                  <option value="All">All</option>
-                  <option value="Critical">Critical</option>
-                  <option value="High">High</option>
-                  <option value="Medium">Medium</option>
-                  <option value="Low">Low</option>
-                </select>
-              </div>
-            </div>
-          </Box>
 
           {/* Performance Monitor Panel */}
           <Box className="card-ems-static p-5 border border-slate-100 bg-white shadow-sm"
@@ -556,33 +598,80 @@ const AdminTaskView = () => {
         {/* ── Right Column - Task Table ── */}
         <div className="flex-1">
           <Box className="card-ems-static overflow-hidden border border-slate-100">
-            {/* Table Header */}
-            <div className="p-4 border-b border-slate-100 flex flex-wrap gap-3 justify-between items-center bg-white">
-              <div className="relative w-full max-w-xs">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            {/* Table Header / Filters */}
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between gap-4 bg-white/50 backdrop-blur-sm sticky top-0 z-10">
+              {/* Left Side: Search */}
+              <div className="relative group max-w-xs flex-1">
+                <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-600 transition-colors" />
                 <input
-                  className="form-input-ems pl-10 h-10 text-xs"
+                  className="w-full pl-10 pr-4 h-10 text-[13px] font-medium bg-slate-50/50 border border-slate-100 rounded-xl outline-none focus:bg-white focus:border-indigo-200 focus:ring-4 focus:ring-indigo-500/5 transition-all placeholder:text-slate-400"
                   placeholder="Search tasks, people or projects..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
               </div>
+
+              {/* Middle: Filters */}
+              <div className="flex items-center gap-3">
+                <PremiumFilter 
+                  label="Department"
+                  value={filterDept}
+                  options={depts.filter(d => d !== "All")}
+                  icon={Briefcase}
+                  onChange={setFilterDept}
+                  active={filterDept !== 'All'}
+                />
+
+                <PremiumFilter 
+                  label="Priority"
+                  value={filterPriority}
+                  options={["Critical", "High", "Medium", "Low"]}
+                  icon={AlertTriangle}
+                  onChange={setFilterPriority}
+                  active={filterPriority !== 'All'}
+                />
+
+                <PremiumFilter 
+                  label="Status"
+                  value={filterStatus}
+                  options={["Pending", "In Progress", "Completed", "In Review"]}
+                  icon={Activity}
+                  onChange={setFilterStatus}
+                  active={filterStatus !== 'All'}
+                />
+
+                {/* Clear All */}
+                {activeFilterCount > 0 && (
+                  <Tooltip title="Reset all filters" arrow>
+                    <button
+                      onClick={clearAllFilters}
+                      className="flex items-center justify-center w-10 h-10 rounded-xl bg-red-50 text-red-500 hover:bg-red-500 hover:text-white transition-all active:scale-95 shadow-sm shadow-red-100 hover:shadow-red-200"
+                    >
+                      <X size={18} />
+                    </button>
+                  </Tooltip>
+                )}
+              </div>
+
+              {/* Right Side: KPI Status / Count */}
               <div className="flex items-center gap-3">
                 {activeStatusFilter && (
                   <Chip
-                    label={`Filtered: ${activeStatusFilter === 'total' ? 'All' : activeStatusFilter.replace('_', ' ')}`}
+                    label={`${activeStatusFilter.replace('_', ' ')} KPI`}
                     size="small"
                     onDelete={() => setActiveStatusFilter(null)}
                     sx={{
-                      height: 24, fontSize: '10px', fontWeight: 800,
-                      bgcolor: '#eef2ff', color: '#4f46e5',
-                      textTransform: 'capitalize',
+                      height: 28, fontSize: '10px', fontWeight: 900,
+                      bgcolor: 'rgba(79, 70, 229, 0.08)', color: '#4f46e5',
+                      textTransform: 'uppercase', letterSpacing: '0.05em',
+                      border: '1px solid rgba(79, 70, 229, 0.15)',
                       '& .MuiChip-deleteIcon': { color: '#4f46e5', fontSize: 14 }
                     }}
                   />
                 )}
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">
-                  Showing {filteredTasks.length} tasks
+                <div className="px-3 py-1.5 bg-slate-50 rounded-lg border border-slate-100">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none block mb-0.5">Total Matches</span>
+                  <span className="text-[12px] font-bold text-slate-900">{filteredTasks.length}</span>
                 </div>
               </div>
             </div>

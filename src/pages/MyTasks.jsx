@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { Box, Avatar, IconButton, Collapse, Menu, MenuItem, CircularProgress, Skeleton, Dialog } from '@mui/material';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor,
   useSensor, useSensors
@@ -50,8 +50,15 @@ const PriorityBadge = ({ priority }) => {
     Low: "bg-emerald-50 text-emerald-600 border-emerald-100",
     Critical: "bg-red-600 text-white border-red-700"
   };
+  const dotColors = {
+    High: "bg-red-500",
+    Medium: "bg-amber-500",
+    Low: "bg-emerald-500",
+    Critical: "bg-white"
+  };
   return (
-    <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-widest ${styles[priority] || styles.Low}`}>
+    <span className={`text-[9px] font-bold px-3 py-1 rounded-full border uppercase tracking-widest inline-flex items-center gap-2 ${styles[priority] || styles.Low}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${dotColors[priority] || dotColors.Low}`}></span>
       {priority}
     </span>
   );
@@ -67,8 +74,14 @@ const StatusChip = ({ status }) => {
     red: "bg-red-50 text-red-600 border-red-100"
   };
 
+  // Special case: Completed tasks use the pending (slate) background but green text
+  let className = colorMap[config.color];
+  if (status === 'done') {
+    className = "bg-slate-50 text-emerald-600 border-emerald-100";
+  }
+
   return (
-    <span className={`text-[10px] font-bold px-3 py-1 rounded-full border ${colorMap[config.color]}`}>
+    <span className={`text-[10px] font-bold px-3 py-1 rounded-full border ${className}`}>
       {config.label}
     </span>
   );
@@ -1294,7 +1307,7 @@ const TaskGrid = ({ tasks, onTaskClick, onTaskMenuClick, currentUserId, onSubmit
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -20 }}
-      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6"
+      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6"
     >
       {tasks.map((task) => {
         const isOverdue = task.deadline && new Date(task.deadline) < new Date() && task.status !== 'done';
@@ -1304,51 +1317,88 @@ const TaskGrid = ({ tasks, onTaskClick, onTaskMenuClick, currentUserId, onSubmit
           <div
             key={task.id}
             onClick={() => onTaskClick(task)}
-            className="bg-white rounded-[32px] p-8 border border-slate-100 hover:border-primary/20 hover:shadow-premium transition-all cursor-pointer group relative flex flex-col h-full"
+            className={`rounded-[24px] p-5 border transition-all cursor-pointer group relative flex flex-col h-full ${task.status === 'done' 
+              ? 'bg-emerald-100/50 border-emerald-200 shadow-sm shadow-emerald-50' 
+              : 'bg-white border-slate-100 hover:border-primary/20 hover:shadow-premium'
+              }`}
           >
-            <div className="flex justify-between items-start mb-6">
-              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${task.priority === 'High' ? 'bg-red-50 text-red-500' :
-                task.priority === 'Medium' ? 'bg-amber-50 text-amber-600' : 'bg-primary-light text-primary'
-                }`}>
-                {task.priority === 'High' ? <AlertCircle size={24} /> :
-                  task.priority === 'Medium' ? <Briefcase size={24} /> : <CheckCircle size={24} />}
+            {/* Top Header: User Info & Status */}
+            <div className="flex justify-between items-center mb-3">
+              <div className="flex items-center gap-2.5">
+                <Avatar
+                  sx={{
+                    width: 32, height: 32,
+                    fontSize: 12, fontWeight: 800,
+                    bgcolor: isAssignee ? 'var(--emerald-50)' : 'var(--primary-light)',
+                    color: isAssignee ? 'var(--emerald-600)' : 'var(--primary)',
+                    borderRadius: '10px'
+                  }}
+                >
+                  {(isAssignee ? task.assignedByName : task.assignedToName)?.charAt(0)}
+                </Avatar>
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="text-[11px] font-black text-slate-900 leading-tight uppercase tracking-tight truncate whitespace-nowrap">
+                    {isAssignee ? task.assignedByName : task.assignedToName}
+                  </span>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter truncate">
+                    {isAssignee ? 'Assigner' : task.departmentName}
+                  </span>
+                </div>
               </div>
-              <IconButton
-                size="small"
-                className="text-slate-200 opacity-0 group-hover:opacity-100 transition-opacity"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onTaskMenuClick(e.currentTarget, task);
-                }}
-              >
-                <MoreVertical size={18} />
-              </IconButton>
+              
+              <div className="flex items-center gap-2 shrink-0 ml-2">
+                <StatusChip status={task.status} />
+                <IconButton
+                  size="small"
+                  className="text-slate-200 opacity-0 group-hover:opacity-100 transition-opacity p-1"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTaskMenuClick(e.currentTarget, task);
+                  }}
+                >
+                  <MoreVertical size={16} />
+                </IconButton>
+              </div>
             </div>
 
-            <h3 className="text-base font-bold text-slate-900 mb-2 leading-tight group-hover:text-primary transition-colors">
+            {/* Separator */}
+            <div className="h-px bg-slate-50 w-full mb-4" />
+
+            {/* Priority Icon */}
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-3 ${task.priority === 'High' ? 'bg-red-50 text-red-500' :
+              task.priority === 'Medium' ? 'bg-amber-50 text-amber-600' : 'bg-primary-light text-primary'
+              }`}>
+              {task.priority === 'High' ? <AlertCircle size={20} /> :
+                task.priority === 'Medium' ? <Briefcase size={20} /> : <CheckCircle size={20} />}
+            </div>
+
+            {/* Title & Deadline */}
+            <h3 className="text-[15px] font-black text-slate-900 mb-1 leading-[1.2] group-hover:text-primary transition-colors tracking-tight">
               {task.title}
             </h3>
 
-            <div className="flex items-center gap-2 mb-5 text-[10px] font-medium text-slate-400">
-              <Calendar size={12} />
+            <div className="flex items-center gap-2 mb-4 text-[10px] font-bold text-slate-400">
+              <Calendar size={13} className="text-slate-300" />
               <span>
                 {task.deadline
                   ? `Due ${new Date(task.deadline).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`
                   : 'No deadline'}
               </span>
-              {isOverdue && <span className="text-red-400 font-bold">· Overdue</span>}
+              {isOverdue && <span className="text-red-400">· Overdue</span>}
             </div>
 
-            <div className="mb-8">
+            {/* Priority Badge */}
+            <div className="mb-5">
               <PriorityBadge priority={task.priority} />
             </div>
 
+            {/* Progress Section (Pinned to Bottom) */}
             <div className="mt-auto">
-              <div className="flex justify-between items-center mb-2.5">
-                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+              <div className="flex justify-between items-center mb-3">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.1em]">
                   Progress
                 </span>
-                <span className="text-[9px] font-bold text-slate-900">{task.progress}%</span>
+                <span className="text-[10px] font-black text-slate-900">{task.progress}%</span>
               </div>
               <div className="w-full h-1 bg-slate-50 rounded-full overflow-hidden">
                 <div
@@ -1358,70 +1408,30 @@ const TaskGrid = ({ tasks, onTaskClick, onTaskMenuClick, currentUserId, onSubmit
               </div>
             </div>
 
-            <div className="mt-8 border-t border-slate-50 pt-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  {isAssignee ? (
-                    <>
-                      <Avatar
-                        sx={{
-                          width: 24, height: 24,
-                          fontSize: 10, fontWeight: 800,
-                          bgcolor: 'var(--emerald-50)',
-                          color: 'var(--emerald-600)'
-                        }}
-                      >
-                        {task.assignedByName ? task.assignedByName.charAt(0) : 'S'}
-                      </Avatar>
-                      <div className="flex flex-col">
-                        <span className="text-[9px] font-bold text-slate-900 leading-none mb-0.5">{task.assignedByName}</span>
-                        <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter leading-none">Assigner</span>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <Avatar
-                        sx={{
-                          width: 24, height: 24,
-                          fontSize: 10, fontWeight: 800,
-                          bgcolor: 'var(--primary-light)',
-                          color: 'var(--primary)'
-                        }}
-                      >
-                        {task.assignedToName ? task.assignedToName.charAt(0) : 'U'}
-                      </Avatar>
-                      <div className="flex flex-col">
-                        <span className="text-[9px] font-bold text-slate-900 leading-none mb-0.5">{task.assignedToName}</span>
-                        <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter leading-none">{task.departmentName}</span>
-                      </div>
-                    </>
-                  )}
-                </div>
-                <StatusChip status={task.status} />
-              </div>
-
-              <div className="flex flex-col gap-2">
+            {/* Workflow Action (Optional Footer Space) */}
+            {(isAssignee && task.status === 'in_progress') || (isAssigner && task.status === 'review') ? (
+              <div className="mt-5 flex flex-col gap-2">
                 {isAssignee && task.status === 'in_progress' && (
                   <button
                     onClick={e => { e.stopPropagation(); onSubmitReview(task); }}
-                    className="w-full flex items-center justify-center gap-1.5 py-2 text-[10px] font-bold text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                    className="w-full flex items-center justify-center gap-1.5 py-2.5 text-[10px] font-black uppercase tracking-widest text-indigo-600 bg-indigo-50/50 hover:bg-indigo-50 rounded-xl transition-all border border-indigo-100/50"
                   >
-                    <SendHorizonal size={11} /> Submit for Review
+                    <SendHorizonal size={12} /> Submit for Review
                   </button>
                 )}
                 {isAssigner && task.status === 'review' && (
                   <button
                     onClick={e => { e.stopPropagation(); onMarkDone(task); }}
-                    className="w-full flex items-center justify-center gap-1.5 py-2 text-[10px] font-bold text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                    className="w-full flex items-center justify-center gap-1.5 py-2.5 text-[10px] font-black uppercase tracking-widest text-emerald-600 bg-emerald-50/50 hover:bg-emerald-50 rounded-xl transition-all border border-emerald-100/50"
                   >
-                    <ThumbsUp size={11} /> Approve & Done
+                    <ThumbsUp size={12} /> Approve & Done
                   </button>
                 )}
+              </div>
+            ) : null}
                 {task.status === 'review' && !isAssigner && (
                   <p className="text-center text-[9px] text-amber-500 font-bold">⏳ In Review</p>
-                )}
-              </div>
-            </div>
+            )}
           </div>
         );
       })}
@@ -1493,7 +1503,10 @@ const TaskDetailedList = ({ tasks, onTaskClick, onTaskMenuClick, currentUserId }
           <div
             key={task.id}
             onClick={() => onTaskClick(task)}
-            className="bg-white rounded-[24px] p-6 border border-slate-100 hover:border-primary/20 hover:shadow-lg transition-all cursor-pointer group flex items-center gap-8"
+            className={`rounded-[24px] p-6 border transition-all cursor-pointer group flex items-center gap-8 ${task.status === 'done' 
+              ? 'bg-emerald-100/40 border-emerald-200 shadow-sm shadow-emerald-50' 
+              : 'bg-white border-slate-100 hover:border-primary/20 hover:shadow-lg'
+              }`}
           >
             <div className="flex items-center gap-4 w-[30%]">
               <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${task.priority === 'High' ? 'bg-red-50 text-red-500' :
@@ -1584,7 +1597,8 @@ const MyTasks = () => {
   const [isModalOpen, setModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState('grid');
   const [viewAnchor, setViewAnchor] = useState(null);
-  const [statusFilter, setStatusFilter] = useState('all');
+  const location = useLocation();
+  const [statusFilter, setStatusFilter] = useState(location.state?.statusFilter || 'all');
   const [filterAnchor, setFilterAnchor] = useState(null);
   const [taskMenu, setTaskMenu] = useState({ anchor: null, task: null });
   const [editingTask, setEditingTask] = useState(null);
@@ -1594,8 +1608,20 @@ const MyTasks = () => {
   const tasks = useMemo(() => {
     if (fetchError) return [];
 
+    const statusOrderMap = {
+      in_progress: 0,
+      review: 0,
+      pending: 1,
+      done: 2
+    };
+
     return rawTasks
-      .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.id.localeCompare(b.id))
+      .sort((a, b) => {
+        const orderA = statusOrderMap[a.status] ?? 3;
+        const orderB = statusOrderMap[b.status] ?? 3;
+        if (orderA !== orderB) return orderA - orderB;
+        return (a.sort_order || 0) - (b.sort_order || 0) || a.id.localeCompare(b.id);
+      })
       .map(normalizeTask);
   }, [rawTasks, fetchError]);
 
@@ -1726,7 +1752,8 @@ const MyTasks = () => {
       t.project_name?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesTab = taskTab === 'assigned_to' ? t.assigned_to === user?.id : t.assigned_by === user?.id;
     let matchesStatus = true;
-    if (statusFilter === 'pending') matchesStatus = t.status !== 'done';
+    if (statusFilter === 'pending') matchesStatus = t.status === 'pending';
+    else if (statusFilter === 'in_progress') matchesStatus = t.status === 'in_progress' || t.status === 'review';
     else if (statusFilter === 'completed') matchesStatus = t.status === 'done';
     return matchesSearch && matchesTab && matchesStatus;
   });
@@ -1804,7 +1831,10 @@ const MyTasks = () => {
                   >
                     <Filter size={18} className="text-slate-400" />
                     <span className="text-[10px] font-black uppercase tracking-widest text-slate-600">
-                      {statusFilter === 'all' ? 'All Tasks' : statusFilter === 'pending' ? 'Active' : 'Finished'}
+                      {statusFilter === 'all' ? 'All Tasks' : 
+                       statusFilter === 'pending' ? 'Pending Tasks' : 
+                       statusFilter === 'in_progress' ? 'In Progress Tasks' : 
+                       'Completed Tasks'}
                     </span>
                     <ChevronDownIcon size={14} className="text-slate-300" />
                   </button>
@@ -1821,8 +1851,9 @@ const MyTasks = () => {
                   >
                     {[
                       { id: 'all', label: 'All Tasks' },
-                      { id: 'pending', label: 'Active Tasks' },
-                      { id: 'completed', label: 'Finished Tasks' },
+                      { id: 'pending', label: 'Pending Tasks' },
+                      { id: 'in_progress', label: 'In Progress Tasks' },
+                      { id: 'completed', label: 'Completed Tasks' },
                     ].map((item) => (
                       <MenuItem
                         key={item.id}
@@ -1922,8 +1953,12 @@ const MyTasks = () => {
               )}
             </Menu>
           </motion.div>
-        ) : (
+        ) : activeTask ? (
           <TaskWorkspace activeTask={activeTask} allTasks={tasks} onTaskSelect={handleTaskClick} onBack={() => navigate('/my-tasks')} onAddTask={() => setModalOpen(true)} currentUserId={user?.id} onSubmitReview={handleSubmitForReview} onMarkDone={handleMarkDone} />
+        ) : (
+          <div className="flex justify-center items-center min-h-[400px]">
+            <CircularProgress sx={{ color: 'var(--primary)' }} />
+          </div>
         )}
       </AnimatePresence>
       <CreateTaskModal open={isModalOpen} onClose={() => { setModalOpen(false); setEditingTask(null); }} onCreate={handleCreateTask} initialData={editingTask} isSubmitting={createTask.isPending || updateTask.isPending} />

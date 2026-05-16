@@ -181,8 +181,8 @@ export const reportService = {
   /**
    * [HR/ADMIN] Get all reports for today
    */
-  async getTodayReports() {
-    const today = getTodayIST();
+  async getTodayReports(date = null) {
+    const today = date || getTodayIST();
 
     try {
       const { data, error } = await supabase

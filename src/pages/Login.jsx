@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Box } from '@mui/material';
-import { Briefcase, Lock, Mail, ShieldAlert, Eye, EyeOff } from 'lucide-react';
+import { Briefcase, Lock, Mail, ShieldAlert, Eye, EyeOff, Rocket } from 'lucide-react';
 import { getDashboardRoute } from '../utils/roleHelpers';
 
 const Login = () => {
@@ -14,13 +14,17 @@ const Login = () => {
 
   const { login, user, profile, error: authError, loading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   // Handle Redirection on Success
+  // If user was redirected here from a protected route, send them back there.
+  // Otherwise, send them to their role-based dashboard.
   useEffect(() => {
     if (!authLoading && user && profile) {
-      navigate(getDashboardRoute(profile.role));
+      const intendedPath = location.state?.from?.pathname || getDashboardRoute(profile.role);
+      navigate(intendedPath, { replace: true });
     }
-  }, [user, profile, authLoading, navigate]);
+  }, [user, profile, authLoading, navigate, location]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -59,11 +63,9 @@ const Login = () => {
       }}>
         <div className="text-center mb-8">
           <div className="flex justify-center mb-5">
-            <div className="w-16 h-16 rounded-2xl bg-indigo-600 flex items-center justify-center text-white shadow-xl shadow-indigo-200">
-              <Briefcase size={30} />
-            </div>
+            <img src="/logo.png" alt="Logo" className="w-16 h-16 rounded-2xl shadow-xl shadow-indigo-200" />
           </div>
-          <h1 className="text-2xl font-black text-slate-900 mb-1 tracking-tight">EMS Pro Login</h1>
+          <h1 className="text-2xl font-black text-slate-900 mb-1 tracking-tight">EMS Cocpit Login</h1>
           <p className="text-sm text-slate-500 font-semibold">Production-Grade Security Enabled</p>
         </div>
 

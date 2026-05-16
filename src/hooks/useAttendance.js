@@ -55,8 +55,8 @@ export const usePunchIn = () => {
 export const usePunchOut = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ recordId, punchInTime, lunchDurationMs = 0 }) =>
-      attendanceService.punchOut(recordId, punchInTime, lunchDurationMs),
+    mutationFn: ({ recordId, punchInTime, lunchDurationMs = 0, isAutoPunchOut = false }) =>
+      attendanceService.punchOut(recordId, punchInTime, lunchDurationMs, isAutoPunchOut),
     onSuccess: (data) => {
       const userId = data.user_id;
       queryClient.invalidateQueries({ queryKey: ['attendance', 'active', userId] });
@@ -150,3 +150,12 @@ export const useEmployeeDashboardStats = (userId) => {
     enabled: !!userId,
   });
 };
+
+export const useIpValidity = () => {
+  return useQuery({
+    queryKey: ['attendance', 'ip_validity'],
+    queryFn: () => attendanceService.checkIpValidity(),
+    refetchInterval: 30000, // Check every 30s
+  });
+};
+

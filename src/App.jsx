@@ -31,6 +31,7 @@ import ChatModule from './pages/ChatModule';
 import MyTeam from './pages/MyTeam';
 import MyCalendar from './pages/MyCalendar';
 import MyAnalytics from './pages/MyAnalytics';
+import IpManagement from './pages/IpManagement';
 
 // Components
 import ProtectedRoute from './routes/ProtectedRoute';
@@ -73,6 +74,10 @@ const muiTheme = createTheme({
         root: {
           backdropFilter: 'blur(8px)',
           backgroundColor: 'rgba(15, 23, 42, 0.45)',
+        },
+        invisible: {
+          backdropFilter: 'none',
+          backgroundColor: 'transparent',
         }
       }
     }
@@ -115,6 +120,7 @@ function App() {
                 <Route path="/users" element={<ProtectedRoute allowedRoles={['super_admin']}><UsersPage /></ProtectedRoute>} />
                 <Route path="/settings" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><Settings /></ProtectedRoute>} />
                 <Route path="/organization-tasks" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><AdminTaskView /></ProtectedRoute>} />
+                <Route path="/ip-management" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><IpManagement /></ProtectedRoute>} />
 
                 {/* Employee Modules */}
                 <Route path="/my-attendance" element={<ProtectedRoute allowedRoles={['employee']}><MyAttendance /></ProtectedRoute>} />

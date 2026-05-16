@@ -102,7 +102,7 @@ export const profileService = {
       .from('profiles')
       .select(`
         id, full_name, email, designation, avatar_url, role,
-        attendance(status, attendance_date)
+        attendance!attendance_profiles_user_id_fkey(status, attendance_date)
       `)
       .eq('department_id', departmentId)
       .eq('status', 'active')

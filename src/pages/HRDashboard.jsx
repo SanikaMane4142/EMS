@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Box, Avatar, Skeleton, Modal } from '@mui/material';
+import { Box, Avatar, Skeleton, Modal, Tooltip } from '@mui/material';
 import { toast } from 'react-hot-toast';
-import { 
-  Users, UserCheck, UserX, Clock, CalendarOff, FileText, 
+import {
+  Users, UserCheck, UserX, Clock, CalendarOff, FileText,
   Megaphone, Send, X, ChevronRight, Save, Zap, Archive, Trash2, History,
-  CheckSquare, Shield, Building
+  CheckSquare, Shield, Building, Calendar
 } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import PageHeader from '../components/PageHeader';
@@ -27,6 +27,8 @@ const HRDashboard = () => {
   const [leaveStats, setLeaveStats] = useState({ pending: 0, approved: 0, rejected: 0 });
   const [kpiStats, setKpiStats] = useState({ total: 0, present: 0, absent: 0, late: 0 });
   const [activeNoticeCount, setActiveNoticeCount] = useState(0);
+  const [selectedDate, setSelectedDate] = useState(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }));
+  const isToday = selectedDate === new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 
   // Announcement State
   const [showNoticeModal, setShowNoticeModal] = useState(false);
@@ -36,19 +38,19 @@ const HRDashboard = () => {
   const [submitting, setSubmitting] = useState(false);
 
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = async (date = selectedDate) => {
     try {
       setLoading(true);
 
       const [attendanceData, leaves, todayKpi, reports, allEmps, activeNotices] = await Promise.allSettled([
-        attendanceService.getAttendanceOverview(),
+        attendanceService.getAttendanceOverview({ date }),
         leaveService.getLeaveSummary(),
-        attendanceService.getTodayStats(),
-        reportService.getTodayReports(),
+        attendanceService.getTodayStats(date),
+        reportService.getTodayReports(date),
         profileService.getAllEmployees(),
         supabase.from('announcements').select('*', { count: 'exact', head: true }).eq('is_active', true).neq('is_deleted', true)
       ]);
-      
+
       setAttendance(attendanceData.status === 'fulfilled' ? (attendanceData.value || []) : []);
       setLeaveStats(leaves.status === 'fulfilled' ? (leaves.value || { pending: 0, approved: 0, rejected: 0 }) : { pending: 0, approved: 0, rejected: 0 });
       setRecentReports(reports.status === 'fulfilled' ? (reports.value || []) : []);
@@ -77,7 +79,10 @@ const HRDashboard = () => {
   };
 
   useEffect(() => {
-    fetchDashboardData();
+    fetchDashboardData(selectedDate);
+  }, [selectedDate]);
+
+  useEffect(() => {
     fetchAnnouncements();
 
     // Real-time: auto-refresh when attendance OR reports change
@@ -152,7 +157,7 @@ const HRDashboard = () => {
 
   return (
     <div className="animate-in fade-in duration-500">
-      <PageHeader title="HR Dashboard" subtitle="Overview of today's workforce activity">
+      <PageHeader title="HR Dashboard" subtitle={`Overview of ${isToday ? "today's" : new Date(selectedDate).toLocaleDateString([], { month: 'long', day: 'numeric' }) + "'s"} workforce activity`}>
         <button className="btn-ems btn-ems-outline" onClick={() => setShowNoticeModal(true)}>
           <Megaphone size={16} /> Broadcast Notice
         </button>
@@ -161,8 +166,8 @@ const HRDashboard = () => {
       {/* KPI Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5 mb-6">
         <StatCard title="Total Employees" value={loading ? '...' : kpiStats.total.toString()} icon={Users} color="#4f46e5" bgColor="#eef2ff" />
-        <StatCard title="Present Today" value={loading ? '...' : kpiStats.present.toString()} icon={UserCheck} color="#10b981" bgColor="#ecfdf5" />
-        <StatCard title="Absent Today" value={loading ? '...' : kpiStats.absent.toString()} icon={UserX} color="#ef4444" bgColor="#fef2f2" />
+        <StatCard title={isToday ? "Present Today" : "Present"} value={loading ? '...' : kpiStats.present.toString()} icon={UserCheck} color="#10b981" bgColor="#ecfdf5" />
+        <StatCard title={isToday ? "Absent Today" : "Absent"} value={loading ? '...' : kpiStats.absent.toString()} icon={UserX} color="#ef4444" bgColor="#fef2f2" />
         <StatCard title="Leave Requests" value={loading ? '...' : leaveStats.pending.toString()} icon={CalendarOff} color="#f59e0b" bgColor="#fffbeb" />
         <StatCard title="Live Notices" value={loading ? '...' : activeNoticeCount.toString()} icon={Megaphone} color="#7c3aed" bgColor="#f5f3ff" />
       </div>
@@ -204,11 +209,30 @@ const HRDashboard = () => {
         <Box className="card-ems-static" sx={{ overflow: 'hidden' }}>
           <Box sx={{ p: 3, pb: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
             <h3 className="text-base font-bold text-slate-900">Attendance Overview</h3>
-            <div className="flex gap-2">
-              <button className="btn-ems btn-ems-primary" style={{ height: 32, fontSize: 12, padding: '0 12px' }} onClick={() => navigate('/organization-tasks')}>
-                 Manage Tasks
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 px-3 py-1 bg-slate-50 rounded-lg border border-slate-200">
+                <Calendar size={14} className="text-slate-400" />
+                <input 
+                  type="date" 
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  className="bg-transparent border-none text-[11px] font-bold text-slate-600 outline-none cursor-pointer"
+                />
+              </div>
+              <button 
+                className="btn-ems btn-ems-primary" 
+                style={{ height: 32, fontSize: 12, padding: '0 12px' }} 
+                onClick={() => navigate('/organization-tasks')}
+              >
+                Manage Tasks
               </button>
-              <button className="btn-ems btn-ems-secondary" style={{ height: 32, fontSize: 12, padding: '0 12px' }}>Today</button>
+              <button 
+                className="btn-ems btn-ems-secondary" 
+                style={{ height: 32, fontSize: 12, padding: '0 12px' }}
+                onClick={() => setSelectedDate(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }))}
+              >
+                Today
+              </button>
             </div>
           </Box>
           <div className="table-responsive">
@@ -245,16 +269,43 @@ const HRDashboard = () => {
                     <td className="text-sm text-slate-500">{row.dept}</td>
                     <td className="text-sm font-medium text-center">{row.punchIn}</td>
                     <td className="text-sm font-medium text-center">
-                      {row.punchOut === '-' ? <span className="text-amber-500 font-semibold">Active</span> : row.punchOut}
+                      {row.rawStatus === 'punched_in' ? <span className="text-amber-500 font-semibold">Active</span> : row.punchOut}
                     </td>
                     <td className="text-sm font-medium text-center text-slate-500">
-                      {row.lunchDuration > 0 ? `${row.lunchDuration}m` : '-'}
+                      {row.lunchDuration > 0 ? (
+                        <Tooltip
+                          title={
+                            <div className="p-1">
+                              <p className="font-bold border-b border-white/20 mb-1 pb-1">Lunch Details</p>
+                              <p className="text-xs">Start: {row.lunchStart || '-'}</p>
+                              <p className="text-xs">End: {row.lunchEnd || (row.lunchStart ? 'Active' : '-')}</p>
+                            </div>
+                          }
+                          arrow
+                          placement="top"
+                        >
+                          <span className="cursor-help underline decoration-dotted decoration-slate-300 underline-offset-4">
+                            {row.lunchDuration}m
+                          </span>
+                        </Tooltip>
+                      ) : (
+                        row.lunchStart ? (
+                          <Tooltip title={`Started at ${row.lunchStart}`} arrow placement="top">
+                            <span className="text-amber-500 font-bold cursor-help">Active</span>
+                          </Tooltip>
+                        ) : '-'
+                      )}
                     </td>
                     <td className="text-sm font-bold text-center text-indigo-600">
                       {row.overtime > 0 ? `${row.overtime}h` : '-'}
                     </td>
                     <td style={{ textAlign: 'right' }}>
-                      <span className={`badge-pill ${row.status === 'Present' ? 'success' : 'info'}`}>
+                      <span className={`badge-pill ${
+                        row.status === 'Present' ? 'success' : 
+                        row.status === 'On Leave' ? 'primary' : 
+                        row.status === 'Left' ? 'neutral' : 
+                        row.status.includes('Absent') || row.status.includes('!') ? 'danger' : 'warning'
+                      }`}>
                         {row.status}
                       </span>
                     </td>
@@ -291,7 +342,7 @@ const HRDashboard = () => {
         {/* Today's Work Reports */}
         <Box className="card-ems-static" sx={{ p: 3 }}>
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2"><FileText size={18} /> Today's Reports</h3>
+            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2"><FileText size={18} /> {isToday ? "Today's Reports" : `Reports for ${new Date(selectedDate).toLocaleDateString([], { month: 'short', day: 'numeric' })}`}</h3>
             <button className="text-xs font-bold text-indigo-600 hover:underline" onClick={() => navigate('/reports')}>View All</button>
           </div>
           <div className="flex flex-col gap-3">
@@ -353,9 +404,8 @@ const HRDashboard = () => {
                     </div>
                   </td>
                   <td>
-                    <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
-                      notice.priority === 'urgent' ? 'bg-rose-50 text-rose-600' : 'bg-blue-50 text-blue-600'
-                    }`}>
+                    <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${notice.priority === 'urgent' ? 'bg-rose-50 text-rose-600' : 'bg-blue-50 text-blue-600'
+                      }`}>
                       {notice.priority}
                     </span>
                   </td>
@@ -379,39 +429,39 @@ const HRDashboard = () => {
       </Box>
 
       {/* Enterprise-Grade Broadcast Modal */}
-      <Modal 
-        open={showNoticeModal} 
+      <Modal
+        open={showNoticeModal}
         onClose={() => setShowNoticeModal(false)}
         container={() => document.getElementById('root')}
         slotProps={{
-          backdrop: { 
-            style: { 
-              backgroundColor: 'rgba(15, 23, 42, 0.45)', 
-              backdropFilter: 'blur(12px)' 
+          backdrop: {
+            style: {
+              backgroundColor: 'rgba(15, 23, 42, 0.45)',
+              backdropFilter: 'blur(12px)'
             }
           }
         }}
         sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', p: 2 }}
       >
         <Box sx={{
-          width: '100%', maxWidth: 820, 
-          bgcolor: 'rgba(255, 255, 255, 0.92)', 
+          width: '100%', maxWidth: 820,
+          bgcolor: 'rgba(255, 255, 255, 0.92)',
           backdropFilter: 'blur(20px)',
-          borderRadius: '28px', 
-          boxShadow: '0 20px 60px rgba(91, 33, 182, 0.18)', 
+          borderRadius: '28px',
+          boxShadow: '0 20px 60px rgba(91, 33, 182, 0.18)',
           overflow: 'hidden',
-          outline: 'none', 
+          outline: 'none',
           border: '1px solid rgba(255, 255, 255, 0.4)',
           position: 'relative',
           '&::after': { // Ambient Glow
-            content: '""', position: 'absolute', inset: 0, 
-            boxShadow: '0 0 40px rgba(91, 33, 182, 0.1)', 
+            content: '""', position: 'absolute', inset: 0,
+            boxShadow: '0 0 40px rgba(91, 33, 182, 0.1)',
             pointerEvents: 'none', borderRadius: 'inherit'
           }
         }}>
           {/* Subtle Dotted Pattern in Top-Right */}
-          <div className="absolute top-0 right-0 w-32 h-32 opacity-10 pointer-events-none" 
-            style={{ backgroundImage: 'radial-gradient(#5B21F6 1px, transparent 1px)', backgroundSize: '12px 12px' }} 
+          <div className="absolute top-0 right-0 w-32 h-32 opacity-10 pointer-events-none"
+            style={{ backgroundImage: 'radial-gradient(#5B21F6 1px, transparent 1px)', backgroundSize: '12px 12px' }}
           />
 
           {/* Header Section */}
@@ -421,14 +471,14 @@ const HRDashboard = () => {
                 <Megaphone size={32} />
               </div>
             </div>
-            
+
             <div className="flex-1">
               <h2 className="text-[32px] font-bold text-[#111827] leading-none">Broadcast Organization Notice</h2>
               <p className="text-[15px] text-[#6B7280] font-medium mt-1.5">Share important updates and announcements with all employees</p>
             </div>
 
-            <button 
-              onClick={() => setShowNoticeModal(false)} 
+            <button
+              onClick={() => setShowNoticeModal(false)}
               className="w-11 h-11 rounded-full border border-[#DDD6FE] flex items-center justify-center text-[#5B21F6] hover:bg-[#F5F3FF] transition-all"
             >
               <X size={20} />
@@ -436,7 +486,7 @@ const HRDashboard = () => {
           </div>
 
           <form onSubmit={handlePostNotice} className="p-8 pt-4 space-y-6">
-            
+
             <div className="grid grid-cols-2 gap-6">
               {/* Notice Title Card */}
               <div className="bg-white p-5 rounded-[20px] border border-[#E5E7EB] shadow-[0_4px_20px_rgba(0,0,0,0.04)]">
@@ -446,7 +496,7 @@ const HRDashboard = () => {
                 <input
                   type="text" placeholder="Enter a catchy title..."
                   className="w-full h-[54px] rounded-[14px] border-2 border-[#DDD6FE] px-4 text-[15px] outline-none focus:border-[#7C3AED] focus:ring-4 focus:ring-[#7C3AED]/15 transition-all placeholder:text-[#9CA3AF]"
-                  value={noticeData.title} onChange={(e) => setNoticeData({...noticeData, title: e.target.value})}
+                  value={noticeData.title} onChange={(e) => setNoticeData({ ...noticeData, title: e.target.value })}
                   required
                 />
               </div>
@@ -458,7 +508,7 @@ const HRDashboard = () => {
                 </label>
                 <select
                   className="w-full h-[54px] rounded-[14px] border-2 border-[#DDD6FE] px-4 text-[15px] outline-none focus:border-[#7C3AED] focus:ring-4 focus:ring-[#7C3AED]/15 transition-all bg-white appearance-none cursor-pointer"
-                  value={noticeData.priority} onChange={(e) => setNoticeData({...noticeData, priority: e.target.value})}
+                  value={noticeData.priority} onChange={(e) => setNoticeData({ ...noticeData, priority: e.target.value })}
                 >
                   <option value="info">General Information</option>
                   <option value="important">Important Update</option>
@@ -473,23 +523,23 @@ const HRDashboard = () => {
             <div className="bg-white rounded-[20px] border border-[#E5E7EB] overflow-hidden shadow-[0_4px_20px_rgba(0,0,0,0.04)]">
               {/* Toolbar */}
               <div className="h-[54px] bg-[#F8FAFC] border-b border-[#F3F4F6] px-5 flex items-center gap-5 text-[#6B7280]">
-                 <div className="flex items-center gap-4">
-                    <button 
-                      type="button"
-                      onClick={() => document.execCommand('bold', false)}
-                      className="w-10 h-10 flex items-center justify-center font-bold text-[#111827] cursor-pointer hover:bg-[#F5F3FF] rounded-lg transition-colors border border-[#DDD6FE]"
-                    >B</button>
-                    <button 
-                      type="button"
-                      onClick={() => document.execCommand('italic', false)}
-                      className="w-10 h-10 flex items-center justify-center italic font-serif text-[#111827] cursor-pointer hover:bg-[#F5F3FF] rounded-lg transition-colors border border-[#DDD6FE]"
-                    >/</button>
-                    <button 
-                      type="button"
-                      onClick={() => document.execCommand('underline', false)}
-                      className="w-10 h-10 flex items-center justify-center underline text-[#111827] cursor-pointer hover:bg-[#F5F3FF] rounded-lg transition-colors border border-[#DDD6FE]"
-                    >U</button>
-                 </div>
+                <div className="flex items-center gap-4">
+                  <button
+                    type="button"
+                    onClick={() => document.execCommand('bold', false)}
+                    className="w-10 h-10 flex items-center justify-center font-bold text-[#111827] cursor-pointer hover:bg-[#F5F3FF] rounded-lg transition-colors border border-[#DDD6FE]"
+                  >B</button>
+                  <button
+                    type="button"
+                    onClick={() => document.execCommand('italic', false)}
+                    className="w-10 h-10 flex items-center justify-center italic font-serif text-[#111827] cursor-pointer hover:bg-[#F5F3FF] rounded-lg transition-colors border border-[#DDD6FE]"
+                  >/</button>
+                  <button
+                    type="button"
+                    onClick={() => document.execCommand('underline', false)}
+                    className="w-10 h-10 flex items-center justify-center underline text-[#111827] cursor-pointer hover:bg-[#F5F3FF] rounded-lg transition-colors border border-[#DDD6FE]"
+                  >U</button>
+                </div>
               </div>
 
               {/* Editable Content Area */}
@@ -497,7 +547,7 @@ const HRDashboard = () => {
                 contentEditable="true"
                 className="w-full min-h-[220px] p-6 text-[16px] leading-[1.8] text-[#374151] outline-none empty:before:content-[attr(placeholder)] empty:before:text-[#9CA3AF]"
                 placeholder="Write a clear and engaging announcement for your organization..."
-                onInput={(e) => setNoticeData({...noticeData, content: e.currentTarget.innerHTML})}
+                onInput={(e) => setNoticeData({ ...noticeData, content: e.currentTarget.innerHTML })}
                 style={{ wordBreak: 'break-word' }}
               />
 
@@ -509,14 +559,14 @@ const HRDashboard = () => {
 
             {/* Action Buttons */}
             <div className="flex gap-5 pt-2">
-              <button 
+              <button
                 type="button"
                 onClick={() => setShowNoticeModal(false)}
                 className="w-[220px] h-[58px] rounded-[18px] border-2 border-[#DDD6FE] text-[#5B21F6] font-bold text-[16px] hover:bg-[#F5F3FF] transition-all flex items-center justify-center"
               >
                 Save Draft
               </button>
-              <button 
+              <button
                 type="submit"
                 disabled={submitting}
                 className="flex-1 h-[58px] rounded-[18px] bg-gradient-to-r from-[#7C3AED] to-[#5B21F6] text-white font-bold text-[16px] shadow-[0_10px_30px_rgba(91,33,182,0.35)] hover:shadow-[0_12px_35px_rgba(91,33,182,0.45)] hover:-translate-y-0.5 transition-all active:scale-[0.98] disabled:opacity-70 disabled:hover:translate-y-0 flex items-center justify-center gap-3"

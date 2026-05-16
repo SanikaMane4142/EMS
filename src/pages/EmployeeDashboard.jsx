@@ -2,13 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import Swal from 'sweetalert2';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Box, Avatar, Chip, Skeleton, Modal, TextField, Typography, Button } from '@mui/material';
+import { Box, Avatar, Chip, Skeleton, Modal, TextField, Typography, Button, useMediaQuery } from '@mui/material';
 import { toast } from 'react-hot-toast';
-import { Clock, Play, Square, CheckCircle, AlertTriangle, Users, Calendar, FileText, Send, Save, ChevronRight, CheckSquare, Sparkles } from 'lucide-react';
+import { Clock, Play, Square, CheckCircle, AlertTriangle, Users, Calendar, FileText, Send, Save, ChevronRight, CheckSquare, Sparkles, Monitor, Globe } from 'lucide-react';
 import StatCard from '../components/StatCard';
 
 // Hooks
-import { useActiveAttendance, useAttendanceHistory, usePunchIn, usePunchOut, useStartLunch, useResumeWork, useStartOvertime, useEndOvertime, useEmployeeDashboardStats } from '../hooks/useAttendance';
+import { useActiveAttendance, useAttendanceHistory, usePunchIn, usePunchOut, useStartLunch, useResumeWork, useStartOvertime, useEndOvertime, useEmployeeDashboardStats, useIpValidity } from '../hooks/useAttendance';
 import { useTodayReport, useSubmitReport, useMonthlyReportCount } from '../hooks/useReports';
 import { useMyTasks } from '../hooks/useTasks';
 import { profileService } from '../services/profileService';
@@ -43,7 +43,7 @@ const calcElapsedMs = (rec) => {
     diff -= rec.lunch_duration_ms;
   }
 
-  if (rec.lunch_start_time) {
+  if (rec.lunch_start_time && !rec.lunch_end_time) {
     const ongoingLunchMs = now - new Date(rec.lunch_start_time).getTime();
     diff -= ongoingLunchMs;
   }
@@ -52,16 +52,16 @@ const calcElapsedMs = (rec) => {
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const SHIFT_MS = 8 * 60 * 60 * 1000; // 8 hours
-// const SHIFT_MS = 10 * 1000 // 8 hours
-const HALF_DAY_MS = 4 * 60 * 60 * 1000; // 4 hours
-// const HALF_DAY_MS = 5 * 1000;    // 5 seconds (must be less than SHIFT_MS)
-const LUNCH_LIMIT_MS = 60 * 60 * 1000; // 1 hour
+const SHIFT_MS          = 8 * 60 * 60 * 1000;       // 8 hours    — regular paid hours
+const AUTO_PUNCH_OUT_MS = 8.5 * 60 * 60 * 1000;     // 8h 30m     — auto punch-out trigger
+const HALF_DAY_MS       = 4 * 60 * 60 * 1000;       // 4 hours    — minimum for half-day
+const LUNCH_LIMIT_MS    = 60 * 60 * 1000;            // 1 hour     — lunch break limit
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const EmployeeDashboard = () => {
   const { user, profile, loading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const isMobile = useMediaQuery('(max-width:767px)');
 
   // ── Queries & Mutations ───────────────────────────────────────────────────
   const { data: record, isLoading: attendanceLoading } = useActiveAttendance(user?.id);
@@ -70,6 +70,7 @@ const EmployeeDashboard = () => {
   const { data: myTasks = [], isLoading: tasksLoading } = useMyTasks(user?.id);
   const { data: monthlyStats, isLoading: statsLoading } = useEmployeeDashboardStats(user?.id);
   const { data: monthlyReports, isLoading: reportsCountLoading } = useMonthlyReportCount(user?.id);
+  const { data: ipStatus } = useIpValidity();
 
   const { data: team = [], isLoading: teamLoading } = { data: [], isLoading: false };
 
@@ -159,12 +160,12 @@ const EmployeeDashboard = () => {
   const startTimer = (rec) => {
     stopTimer();
     setElapsedMs(calcElapsedMs(rec));
-    setLunchElapsedMs(rec?.lunch_start_time ? Date.now() - new Date(rec.lunch_start_time).getTime() : 0);
+    setLunchElapsedMs(rec?.lunch_start_time && !rec?.lunch_end_time ? Date.now() - new Date(rec.lunch_start_time).getTime() : 0);
     setOvertimeElapsedMs(rec?.overtime_start_time ? Date.now() - new Date(rec.overtime_start_time).getTime() : 0);
 
     timerRef.current = setInterval(() => {
       setElapsedMs(calcElapsedMs(rec));
-      if (rec?.lunch_start_time) {
+      if (rec?.lunch_start_time && !rec?.lunch_end_time) {
         setLunchElapsedMs(Date.now() - new Date(rec.lunch_start_time).getTime());
       }
       if (rec?.overtime_start_time && !rec?.overtime_end_time) {
@@ -180,16 +181,21 @@ const EmployeeDashboard = () => {
     }
   };
 
+  // Ref to prevent firing auto punch-out multiple times
+  const autoPunchOutFiredRef = useRef(false);
+
   useEffect(() => {
     if (record?.status === 'punched_in') {
       startTimer(record);
+      autoPunchOutFiredRef.current = false;
     } else if (record?.punch_in_time && record?.punch_out_time) {
       stopTimer();
+      // Display duration is always punch_out - punch_in - lunch (as stored by server)
       const diffMs = new Date(record.punch_out_time) - new Date(record.punch_in_time);
       setElapsedMs(Math.max(0, diffMs - (record.lunch_duration_ms || 0)));
       setLunchElapsedMs(0);
 
-      // Handle overtime even if punched out
+      // Handle overtime tracking after punch-out
       if (record.overtime_start_time && !record.overtime_end_time) {
         startTimer(record);
       } else if (record.overtime_duration_ms) {
@@ -204,15 +210,42 @@ const EmployeeDashboard = () => {
     return () => stopTimer();
   }, [record]);
 
+  // ── Auto Punch-Out at 8h 30m ────────────────────────────────────────────────
+  // Watches elapsed time; fires once when it crosses AUTO_PUNCH_OUT_MS
+  useEffect(() => {
+    if (
+      record?.status === 'punched_in' &&
+      !autoPunchOutFiredRef.current &&
+      elapsedMs >= AUTO_PUNCH_OUT_MS
+    ) {
+      autoPunchOutFiredRef.current = true;
+      console.log('[Attendance] Auto punch-out triggered at 8h30m');
+
+      // Silently punch out — no confirmation dialog for auto punch-out
+      punchOutMutation.mutateAsync({
+        recordId: record.id,
+        punchInTime: record.punch_in_time,
+        lunchDurationMs: record.lunch_duration_ms || 0,
+        isAutoPunchOut: true,
+      }).catch((err) => {
+        console.error('[Attendance] Auto punch-out failed:', err.message);
+        autoPunchOutFiredRef.current = false; // allow retry on next tick
+      });
+    }
+  }, [elapsedMs, record]);
+
   // ── Derived state ─────────────────────────────────────────────────────────
   const loading = attendanceLoading || authLoading;
-  const isPunchedIn = record?.status === 'punched_in';
+  const isPunchedIn = record?.status === 'punched_in' && record?.punch_in_time != null;
   const isCompleted = record?.status === 'punched_out' || record?.status === 'auto_punched_out';
-  const isLunchBreak = record?.lunch_start_time != null;
+  const isLunchBreak = record?.lunch_start_time != null && !record?.lunch_end_time;
+  // 8h reached = regular shift complete (used for overtime card visibility)
   const isShiftComplete = elapsedMs >= SHIFT_MS;
   const isHalfDayComplete = elapsedMs >= HALF_DAY_MS;
   const remainingMs = Math.max(0, SHIFT_MS - elapsedMs);
   const isLunchExceeded = isLunchBreak && lunchElapsedMs >= LUNCH_LIMIT_MS;
+  // Overtime card: only visible after the shift has been punched out AND 8h were worked
+  const showOvertimeCard = isCompleted && isShiftComplete;
 
 
 
@@ -239,13 +272,24 @@ const EmployeeDashboard = () => {
   const resumeWorkMutation = useResumeWork();
   const startOvertimeMutation = useStartOvertime();
   const endOvertimeMutation = useEndOvertime();
-
   const handlePunchIn = async () => {
     try {
       setActionLoading(true);
       await punchInMutation.mutateAsync(user.id);
+      toast.success('Punched in successfully!');
     } catch (err) {
-      alert('Punch-in failed: ' + err.message);
+      if (err.message.includes('IP_RESTRICTED')) {
+        Swal.fire({
+          title: 'Restricted Access',
+          text: 'Attendance actions are only allowed from the approved office network.',
+          icon: 'error',
+          confirmButtonColor: '#4f46e5',
+          background: '#ffffff',
+          borderRadius: '24px'
+        });
+      } else {
+        toast.error('Punch-in failed: ' + err.message);
+      }
     } finally {
       setActionLoading(false);
     }
@@ -283,12 +327,21 @@ const EmployeeDashboard = () => {
       });
       toast.success('Punched out successfully!');
     } catch (err) {
-      Swal.fire({
-        title: 'Error',
-        text: 'Punch-out failed: ' + err.message,
-        icon: 'error',
-        confirmButtonColor: '#4f46e5'
-      });
+      if (err.message.includes('IP_RESTRICTED')) {
+        Swal.fire({
+          title: 'Restricted Access',
+          text: 'Manual punch-out is only allowed from the approved office network.',
+          icon: 'error',
+          confirmButtonColor: '#4f46e5'
+        });
+      } else {
+        Swal.fire({
+          title: 'Error',
+          text: 'Punch-out failed: ' + err.message,
+          icon: 'error',
+          confirmButtonColor: '#4f46e5'
+        });
+      }
     } finally {
       setActionLoading(false);
     }
@@ -340,8 +393,18 @@ const EmployeeDashboard = () => {
     try {
       setActionLoading(true);
       await startOvertimeMutation.mutateAsync(record.id);
+      toast.success('Overtime started!');
     } catch (err) {
-      alert('Start overtime failed: ' + err.message);
+      if (err.message.includes('IP_RESTRICTED')) {
+        Swal.fire({
+          title: 'Restricted Access',
+          text: 'Overtime actions are only allowed from the approved office network.',
+          icon: 'error',
+          confirmButtonColor: '#4f46e5'
+        });
+      } else {
+        toast.error('Start overtime failed: ' + err.message);
+      }
     } finally {
       setActionLoading(false);
     }
@@ -355,8 +418,18 @@ const EmployeeDashboard = () => {
         recordId: record.id,
         startTime: record.overtime_start_time
       });
+      toast.success('Overtime ended!');
     } catch (err) {
-      alert('End overtime failed: ' + err.message);
+      if (err.message.includes('IP_RESTRICTED')) {
+        Swal.fire({
+          title: 'Restricted Access',
+          text: 'Overtime actions are only allowed from the approved office network.',
+          icon: 'error',
+          confirmButtonColor: '#4f46e5'
+        });
+      } else {
+        toast.error('End overtime failed: ' + err.message);
+      }
     } finally {
       setActionLoading(false);
     }
@@ -392,37 +465,50 @@ const EmployeeDashboard = () => {
       setActionLoading(true);
       const myTasks = await taskService.getMyTasks(user.id);
 
-      // Today's date boundary (midnight to midnight, local time)
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-      const todayEnd = new Date();
-      todayEnd.setHours(23, 59, 59, 999);
+      // ── "Today" boundary using IST (Asia/Kolkata) — consistent with reportService ──
+      const todayIST = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }); // "YYYY-MM-DD"
 
-      const isToday = (dateStr) => {
+      const isUpdatedToday = (dateStr) => {
         if (!dateStr) return false;
+        // Convert the UTC timestamp to IST date string for comparison
         const d = new Date(dateStr);
-        return d >= todayStart && d <= todayEnd;
+        const dIST = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+        return dIST === todayIST;
       };
 
-      // ── IMPROVEMENT 1: Include ALL assigned tasks (including self-assigned)
-      // ── IMPROVEMENT 2: Include tasks finished TODAY (status=done, updated today)
-      const relevantTasks = myTasks.filter(t =>
-        t.assigned_to === user.id &&
-        (
-          t.status === 'in_progress' ||
-          (t.status === 'done' && isToday(t.updated_at))
-        )
-      );
+      // ── Fix 1: Include ALL tasks assigned TO the employee (self-assigned included)
+      // ── Fix 2: Include 'done' tasks updated today (finished same day)
+      // ── Fix 3: Include 'review' tasks (submitted for review = work completed)
+      // ── Fix 4: Include 'in_progress' tasks (ongoing work for the day)
+      // ── Fix 5: Include 'pending' tasks only if they were updated today (started today)
+      const relevantTasks = myTasks.filter(t => {
+        // Must be assigned to this employee (self-assigned is allowed)
+        if (t.assigned_to !== user.id) return false;
+
+        // Always include active/ongoing tasks
+        if (t.status === 'in_progress') return true;
+
+        // Include tasks submitted for review today
+        if (t.status === 'review' && isUpdatedToday(t.updated_at)) return true;
+
+        // Include tasks fully completed today
+        if (t.status === 'done' && isUpdatedToday(t.updated_at)) return true;
+
+        // Include pending tasks that were touched today (e.g., groups added/updated)
+        if (t.status === 'pending' && isUpdatedToday(t.updated_at)) return true;
+
+        return false;
+      });
 
       const plannedItems = [];
       const completedItems = [];
-      const wipItems = [];
+      const reviewItems = [];
 
       relevantTasks.forEach(task => {
         const taskGroups = (task.task_groups || []).filter(g => !g.is_deleted);
 
-        // If the entire task was completed today, report it at the top level
-        if (task.status === 'done' && isToday(task.updated_at) && taskGroups.length === 0) {
+        // ── Case A: Entire task completed today with NO subtask groups ──
+        if (task.status === 'done' && isUpdatedToday(task.updated_at) && taskGroups.length === 0) {
           completedItems.push({
             id: task.id,
             line: `- ${task.title} ✓`
@@ -430,40 +516,75 @@ const EmployeeDashboard = () => {
           return;
         }
 
+        // ── Case B: Task submitted for review today with NO subtask groups ──
+        if (task.status === 'review' && isUpdatedToday(task.updated_at) && taskGroups.length === 0) {
+          reviewItems.push({
+            id: task.id,
+            line: `- ${task.title} (submitted for review)`
+          });
+          return;
+        }
+
+        // ── Case B2: Task is active with NO subtask groups ──
+        if ((task.status === 'in_progress' || task.status === 'pending') && taskGroups.length === 0) {
+          plannedItems.push({
+            id: task.id,
+            line: `- ${task.title}`
+          });
+          return;
+        }
+
+        // ── Case C: Iterate subtask groups ──
         taskGroups.forEach(group => {
-          // PLANNED: subtask group not yet completed = planning to work on it
-          if (!group.is_completed) {
+          const groupMinis = (group.subtasks || []).filter(s => !s.is_deleted);
+
+          if (group.is_completed) {
+            // Group was completed — ONLY add to completed if done today
+            if (isUpdatedToday(group.updated_at)) {
+              completedItems.push({
+                id: group.id,
+                line: `- ${task.title} → ${group.title} ✓`
+              });
+            }
+
+            // Also list individual mini-tasks that are done within this group
+            groupMinis.forEach(mini => {
+              if (mini.is_completed && isUpdatedToday(mini.updated_at)) {
+                completedItems.push({
+                  id: mini.id,
+                  line: `   • ${mini.title}`
+                });
+              }
+            });
+          } else {
+            // Group not yet completed — it's planned / in progress for today
             plannedItems.push({
               id: group.id,
               line: `- ${task.title} → ${group.title}`
             });
-          }
 
-          // Rule: COMPLETED - Include both subtask groups AND mini-tasks
-          if (group.is_completed) {
-            completedItems.push({
-              id: group.id,
-              line: `- ${task.title} → ${group.title}`
+            // Include any individual mini-tasks completed today within this pending group
+            // Only show mini-task title — parent path is already shown in the group line above
+            groupMinis.forEach(mini => {
+              if (mini.is_completed && isUpdatedToday(mini.updated_at)) {
+                completedItems.push({
+                  id: mini.id,
+                  line: `   • ${mini.title} ✓`
+                });
+              }
             });
           }
-
-          // Mini-tasks for COMPLETED
-          (group.subtasks || []).forEach(mini => {
-            if (mini.is_completed) {
-              completedItems.push({
-                id: mini.id,
-                line: `  • ${task.title} → ${group.title} → ${mini.title}`
-              });
-            }
-          });
         });
       });
 
-      setReportData(prev => {
-        const PLANNED_HEADER = "── Auto-filled: Planned Today ──";
-        const COMPLETED_HEADER = "── Auto-filled: Completed Today ──";
-        const WIP_HEADER = "── Auto-filled: In Progress ──";
+      // Merge reviewItems into completedItems with a note
+      const allCompletedItems = [...completedItems, ...reviewItems];
 
+      setReportData(prev => {
+        const PLANNED_HEADER   = "── Auto-filled: Planned Today ──";
+        const COMPLETED_HEADER = "── Auto-filled: Completed Today ──";
+
+        // Strip previously auto-filled sections so re-running doesn't duplicate
         const stripAutoFill = (text, header) => {
           if (!text) return '';
           const lines = text.split('\n');
@@ -472,38 +593,44 @@ const EmployeeDashboard = () => {
           return lines.slice(0, headerIdx).join('\n').trim();
         };
 
-        const manualPlanned = stripAutoFill(prev.tasks_planned, PLANNED_HEADER);
-        const manualCompleted = stripAutoFill(prev.tasks_completed, COMPLETED_HEADER);
-        const manualWip = stripAutoFill(prev.work_in_progress, WIP_HEADER);
+        const manualPlanned   = stripAutoFill(prev.tasks_planned,   PLANNED_HEADER);
+        const manualCompleted = stripAutoFill(prev.tasks_completed,  COMPLETED_HEADER);
 
-        const newPlannedLines = plannedItems.map(i => i.line);
-        const newCompletedLines = completedItems.map(i => i.line);
-        const newWipLines = wipItems.map(i => i.line);
-        const newAutoPlannedIds = plannedItems.map(i => i.id);
-        const newAutoCompletedIds = completedItems.map(i => i.id);
+        const newPlannedLines   = plannedItems.map(i => i.line);
+        const newCompletedLines = allCompletedItems.map(i => i.line);
 
-        const finalPlanned = (manualPlanned + (manualPlanned ? '\n\n' : '') +
-          (newPlannedLines.length > 0 ? PLANNED_HEADER + '\n' + newPlannedLines.join('\n') : '')).trim();
+        const finalPlanned = (
+          manualPlanned +
+          (manualPlanned && newPlannedLines.length > 0 ? '\n\n' : '') +
+          (newPlannedLines.length > 0 ? PLANNED_HEADER + '\n' + newPlannedLines.join('\n') : '')
+        ).trim();
 
-        const finalCompleted = (manualCompleted + (manualCompleted ? '\n\n' : '') +
-          (newCompletedLines.length > 0 ? COMPLETED_HEADER + '\n' + newCompletedLines.join('\n') : '')).trim();
-
-        const finalWip = (manualWip + (manualWip ? '\n\n' : '') +
-          (newWipLines.length > 0 ? WIP_HEADER + '\n' + newWipLines.join('\n') : '')).trim();
+        const finalCompleted = (
+          manualCompleted +
+          (manualCompleted && newCompletedLines.length > 0 ? '\n\n' : '') +
+          (newCompletedLines.length > 0 ? COMPLETED_HEADER + '\n' + newCompletedLines.join('\n') : '')
+        ).trim();
 
         return {
           ...prev,
-          tasks_planned: finalPlanned,
-          tasks_completed: finalCompleted,
-          work_in_progress: finalWip,
-          auto_filled_planned_tasks: newAutoPlannedIds,
-          auto_filled_completed_tasks: newAutoCompletedIds
+          tasks_planned:               finalPlanned,
+          tasks_completed:             finalCompleted,
+          auto_filled_planned_tasks:   plannedItems.map(i => i.id),
+          auto_filled_completed_tasks: allCompletedItems.map(i => i.id),
         };
       });
 
-      toast.success('Report auto-filled from tasks.');
+      const totalFound = plannedItems.length + allCompletedItems.length;
+      if (totalFound === 0) {
+        toast('No active tasks found for today. Add tasks in the Tasks Center first.', { icon: '📋' });
+      } else {
+        toast.success(
+          `Auto-filled: ${plannedItems.length} planned, ${allCompletedItems.length} completed today.`
+        );
+      }
     } catch (err) {
       console.error('[AutoFill] Error:', err);
+      toast.error('Auto-fill failed. Please try again.');
     } finally {
       setActionLoading(false);
     }
@@ -567,11 +694,11 @@ const EmployeeDashboard = () => {
         />
         <StatCard 
           title="Pending Tasks" 
-          value={tasksLoading ? '...' : `${myTasks.filter(t => t.status !== 'done').length}`} 
+          value={tasksLoading ? '...' : `${myTasks.filter(t => t.status === 'pending').length}`} 
           icon={CheckCircle} 
           color="#8b5cf6" 
           bgColor="#f5f3ff" 
-          onClick={() => navigate('/my-tasks')} 
+          onClick={() => navigate('/my-tasks', { state: { statusFilter: 'pending' } })}
         />
       </div>
 
@@ -586,94 +713,162 @@ const EmployeeDashboard = () => {
           {/* ── Attendance Timer Section (3-State Workflow) ── */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-            {/* Card 1: Shift / Overtime Slot */}
             <div className="relative overflow-hidden min-h-[220px]">
-              {!isCompleted ? (
-                <div className="card-ems-static h-full p-6 border-l-[6px] border-emerald-500 animate-in slide-in-from-left duration-500" style={{ borderRadius: '18px' }}>
-                  <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Shift Duration</span>
-                      <h3 className="text-xl font-extrabold text-slate-900">Regular Shift</h3>
-                    </div>
-                    <div className="flex flex-col items-end gap-1">
-                      <Chip
-                        label={isPunchedIn ? (isShiftComplete ? "Shift Completed" : "Working") : "Not Started"}
-                        size="small"
-                        sx={{
-                          bgcolor: isPunchedIn ? (isShiftComplete ? '#dcfce7' : '#ecfdf5') : '#f1f5f9',
-                          color: isPunchedIn ? (isShiftComplete ? '#15803d' : '#10b981') : '#64748b',
-                          fontWeight: 800, fontSize: 10, height: 24
-                        }}
-                      />
-                      {record?.punch_in_time && (
-                        <span className="text-[10px] font-bold text-slate-400">IN: {new Date(record.punch_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+              <div className="card-ems-static h-full p-6 border-l-[6px] animate-in slide-in-from-left duration-500"
+                style={{
+                  borderRadius: '18px',
+                  borderColor: isCompleted ? '#3b82f6' : isPunchedIn ? '#10b981' : '#f59e0b'
+                }}>
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Shift Duration</span>
+                      {ipStatus && (
+                        <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${ipStatus.is_office_network ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                          <Globe size={10} />
+                          {ipStatus.is_office_network ? 'Office Network' : 'Remote'}
+                        </div>
                       )}
                     </div>
+                    <h3 className="text-xl font-extrabold text-slate-900">Regular Shift</h3>
                   </div>
-
-                  <div className="text-4xl font-black tracking-tighter text-slate-900 mb-6 flex items-baseline gap-2" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                    {timerDisplay}
-                    {isPunchedIn && !isShiftComplete && (
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                    )}
-                  </div>
-
-                  {!record ? (
-                    <button className="btn-ems btn-ems-success w-full h-12 rounded-[14px]" onClick={handlePunchIn} disabled={actionLoading}>
-                      <Play size={18} /> {actionLoading ? 'Pinching In...' : 'Start Today’s Shift'}
-                    </button>
-                  ) : (
-                    <button
-                      className={`btn-ems w-full h-12 rounded-[14px] ${isShiftComplete ? 'btn-ems-danger shadow-lg shadow-red-100' : 'btn-ems-secondary'}`}
-                      onClick={handlePunchOut}
-                      disabled={actionLoading || (isPunchedIn && !isHalfDayComplete)}
-                    >
-                      <Square size={18} /> {isShiftComplete ? 'Punch Out (8h Cap Applied)' : 'Punch Out'}
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <div className="card-ems-static h-full p-6 border-l-[6px] border-indigo-500 animate-in fade-in zoom-in duration-500" style={{ borderRadius: '18px' }}>
-                  <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest block mb-1">Post-Shift Tracking</span>
-                      <h3 className="text-xl font-extrabold text-slate-900">Overtime Session</h3>
-                    </div>
+                  <div className="flex flex-col items-end gap-1">
                     <Chip
-                      label={record.overtime_start_time && !record.overtime_end_time ? "Overtime Active" : "Day Completed"}
+                      label={
+                        isCompleted
+                          ? (record?.status === 'auto_punched_out' ? 'Auto Punched Out' : 'Shift Ended')
+                          : isPunchedIn
+                            ? (isShiftComplete ? 'Shift Complete' : 'Working')
+                            : 'Not Started'
+                      }
                       size="small"
                       sx={{
-                        bgcolor: record.overtime_start_time && !record.overtime_end_time ? '#e0e7ff' : '#f1f5f9',
-                        color: record.overtime_start_time && !record.overtime_end_time ? '#4f46e5' : '#64748b',
+                        bgcolor: isCompleted ? '#dbeafe' : isPunchedIn ? (isShiftComplete ? '#dcfce7' : '#ecfdf5') : '#f1f5f9',
+                        color:   isCompleted ? '#1d4ed8' : isPunchedIn ? (isShiftComplete ? '#15803d' : '#10b981') : '#64748b',
                         fontWeight: 800, fontSize: 10, height: 24
                       }}
                     />
-                  </div>
-
-                  <div className="text-4xl font-black tracking-tighter text-slate-900 mb-6 flex items-baseline gap-2" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                    {formatMs(overtimeElapsedMs)}
-                    {record.overtime_start_time && !record.overtime_end_time && (
-                      <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+                    {record?.punch_in_time && (
+                      <span className="text-[10px] font-bold text-slate-400">IN: {new Date(record.punch_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    )}
+                    {isCompleted && record?.punch_out_time && (
+                      <span className="text-[10px] font-bold text-slate-400">OUT: {new Date(record.punch_out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                     )}
                   </div>
+                </div>
 
-                  {!record.overtime_start_time ? (
-                    <button className="btn-ems btn-ems-primary w-full h-12 rounded-[14px]" style={{ background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)' }} onClick={handleStartOvertime} disabled={actionLoading}>
-                      <Play size={18} /> Start Overtime
-                    </button>
-                  ) : !record.overtime_end_time ? (
-                    <button className="btn-ems btn-ems-danger w-full h-12 rounded-[14px]" onClick={handleEndOvertime} disabled={actionLoading}>
-                      <Square size={18} /> End Overtime
-                    </button>
-                  ) : (
-                    <div className="flex items-center justify-center gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100">
-                      <CheckCircle size={18} className="text-emerald-500" />
-                      <span className="text-sm font-bold text-slate-700">Total OT: {formatMs(record.overtime_duration_ms)}</span>
-                    </div>
+                <div className="text-4xl font-black tracking-tighter text-slate-900 mb-6 flex items-baseline gap-2" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                  {timerDisplay}
+                  {isPunchedIn && (
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                   )}
                 </div>
-              )}
+
+                {/* Sub-label: shows auto punch-out countdown when nearing 8h30m */}
+                {isPunchedIn && elapsedMs >= SHIFT_MS && elapsedMs < AUTO_PUNCH_OUT_MS && (
+                  <p className="text-[11px] font-bold text-amber-600 mb-3 flex items-center gap-1">
+                    ⚡ Auto punch-out in {formatMs(AUTO_PUNCH_OUT_MS - elapsedMs)}
+                  </p>
+                )}
+
+                {isMobile ? (
+                  <div className="flex flex-col gap-3 p-4 bg-amber-50/50 rounded-[14px] border border-amber-100">
+                    <div className="flex items-center gap-2 text-amber-600">
+                      <Monitor size={18} />
+                      <span className="text-[11px] font-black uppercase tracking-tight">Desktop Only Feature</span>
+                    </div>
+                    <p className="text-[11px] font-bold text-amber-800 leading-tight">
+                      Attendance actions are only available on desktop. Please use a desktop device to punch in/out.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    {!record || (!isPunchedIn && !isCompleted) ? (
+                      <button className="btn-ems btn-ems-success w-full h-12 rounded-[14px]" onClick={handlePunchIn} disabled={actionLoading}>
+                        <Play size={18} /> {actionLoading ? 'Punching In...' : 'Start Today\'s Shift'}
+                      </button>
+                    ) : isCompleted ? (
+                      <div className="flex items-center justify-center gap-2 p-3 bg-blue-50 rounded-xl border border-blue-100">
+                        <CheckCircle size={18} className="text-blue-500" />
+                        <span className="text-sm font-bold text-blue-700">
+                          {record?.status === 'auto_punched_out'
+                            ? `Auto closed · 8h paid · ${formatMs(elapsedMs)} logged`
+                            : `Shift ended · ${formatMs(elapsedMs)} logged`
+                          }
+                        </span>
+                      </div>
+                    ) : isPunchedIn ? (
+                      <button
+                        className={`btn-ems w-full h-12 rounded-[14px] ${isShiftComplete ? 'btn-ems-danger shadow-lg shadow-red-100' : 'btn-ems-secondary'}`}
+                        onClick={handlePunchOut}
+                        disabled={actionLoading || (isPunchedIn && !isHalfDayComplete)}
+                      >
+                        <Square size={18} /> {isShiftComplete ? 'Punch Out' : `Punch Out${!isHalfDayComplete ? ' (min 4h)' : ''}`}
+                      </button>
+                    ) : null}
+                  </>
+                )}
+              </div>
             </div>
+
+            {/* Card 1b: Overtime Slot — only visible after punch-out when 8h worked */}
+            {showOvertimeCard && (
+            <div className="relative overflow-hidden min-h-[220px]">
+              <div className="card-ems-static h-full p-6 border-l-[6px] border-indigo-500 animate-in fade-in zoom-in duration-500" style={{ borderRadius: '18px' }}>
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest block mb-1">Post-Shift Tracking</span>
+                    <h3 className="text-xl font-extrabold text-slate-900">Overtime Session</h3>
+                  </div>
+                  <Chip
+                    label={record.overtime_start_time && !record.overtime_end_time ? "Overtime Active" : "Day Completed"}
+                    size="small"
+                    sx={{
+                      bgcolor: record.overtime_start_time && !record.overtime_end_time ? '#e0e7ff' : '#f1f5f9',
+                      color: record.overtime_start_time && !record.overtime_end_time ? '#4f46e5' : '#64748b',
+                      fontWeight: 800, fontSize: 10, height: 24
+                    }}
+                  />
+                </div>
+
+                <div className="text-4xl font-black tracking-tighter text-slate-900 mb-6 flex items-baseline gap-2" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                  {formatMs(overtimeElapsedMs)}
+                  {record.overtime_start_time && !record.overtime_end_time && (
+                    <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+                  )}
+                </div>
+
+                {isMobile ? (
+                  <div className="flex flex-col gap-3 p-4 bg-indigo-50/50 rounded-[14px] border border-indigo-100/50 mt-2">
+                    <div className="flex items-center gap-2 text-indigo-600">
+                      <Monitor size={18} />
+                      <span className="text-[11px] font-black uppercase tracking-tight">Desktop Only Feature</span>
+                    </div>
+                    <p className="text-[11px] font-bold text-indigo-800 leading-tight">
+                      Overtime actions are only available on desktop.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    {!record.overtime_start_time ? (
+                      <button className="btn-ems btn-ems-primary w-full h-12 rounded-[14px]" style={{ background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)' }} onClick={handleStartOvertime} disabled={actionLoading}>
+                        <Play size={18} /> Start Overtime
+                      </button>
+                    ) : !record.overtime_end_time ? (
+                      <button className="btn-ems btn-ems-danger w-full h-12 rounded-[14px]" onClick={handleEndOvertime} disabled={actionLoading}>
+                        <Square size={18} /> End Overtime
+                      </button>
+                    ) : (
+                      <div className="flex items-center justify-center gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                        <CheckCircle size={18} className="text-emerald-500" />
+                        <span className="text-sm font-bold text-slate-700">Total OT: {formatMs(record.overtime_duration_ms)}</span>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+            )}
 
             {/* Card 2: Lunch Break (Visible anytime during active shift until completed) */}
             <div className={`transition-all duration-500 ${isPunchedIn && !isCompleted && !record?.lunch_end_time ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none hidden'}`}>
@@ -701,23 +896,37 @@ const EmployeeDashboard = () => {
                   )}
                 </div>
 
-                {isLunchBreak ? (
-                  <button
-                    className={`btn-ems w-full h-12 rounded-[14px] ${isLunchExceeded ? 'btn-ems-danger' : 'btn-ems-primary'}`}
-                    onClick={onResumeClick}
-                    disabled={actionLoading}
-                    style={{ background: isLunchExceeded ? '#ef4444' : '#f59e0b', border: 'none' }}
-                  >
-                    <Play size={18} /> {isLunchExceeded ? 'Resume Work (Overdue)' : 'Resume Work'}
-                  </button>
+                {isMobile ? (
+                  <div className="flex flex-col gap-3 p-4 bg-amber-50/50 rounded-[14px] border border-amber-100 mt-2">
+                    <div className="flex items-center gap-2 text-amber-600">
+                      <Monitor size={18} />
+                      <span className="text-[11px] font-black uppercase tracking-tight">Desktop Only Feature</span>
+                    </div>
+                    <p className="text-[11px] font-bold text-amber-800 leading-tight">
+                      Lunch breaks must be managed on desktop.
+                    </p>
+                  </div>
                 ) : (
-                  <button
-                    className="btn-ems btn-ems-secondary w-full h-12 rounded-[14px]"
-                    onClick={handleStartLunch}
-                    disabled={actionLoading || isShiftComplete}
-                  >
-                    <Clock size={18} /> Start Lunch Break
-                  </button>
+                  <>
+                    {isLunchBreak ? (
+                      <button
+                        className={`btn-ems w-full h-12 rounded-[14px] ${isLunchExceeded ? 'btn-ems-danger' : 'btn-ems-primary'}`}
+                        onClick={onResumeClick}
+                        disabled={actionLoading}
+                        style={{ background: isLunchExceeded ? '#ef4444' : '#f59e0b', border: 'none' }}
+                      >
+                        <Play size={18} /> {isLunchExceeded ? 'Resume Work (Overdue)' : 'Resume Work'}
+                      </button>
+                    ) : (
+                      <button
+                        className="btn-ems btn-ems-secondary w-full h-12 rounded-[14px]"
+                        onClick={handleStartLunch}
+                        disabled={actionLoading || isShiftComplete}
+                      >
+                        <Clock size={18} /> Start Lunch Break
+                      </button>
+                    )}
+                  </>
                 )}
 
                 {isLunchBreak && (
