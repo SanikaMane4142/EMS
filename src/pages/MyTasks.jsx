@@ -153,16 +153,17 @@ const SortableSubtaskItem = ({ item, onToggle, canEdit = true, onDelete }) => {
         }`}
     >
       {canEdit ? (
-        <div {...attributes} {...listeners} className="p-1 text-slate-200 cursor-grab active:cursor-grabbing opacity-0 group-hover/item:opacity-100 transition-opacity">
+        <div {...attributes} {...listeners} className="w-8 flex items-center justify-center text-slate-200 cursor-grab active:cursor-grabbing opacity-0 group-hover/item:opacity-100 transition-opacity">
           <GripVertical size={14} />
         </div>
       ) : (
-        <div className="p-1 text-transparent">
-          <GripVertical size={14} />
-        </div>
+        <div className="w-8" />
       )}
+      
+      {/* Spacer to match group index width */}
+      <div className="w-6" />
 
-      <div className="flex-1 flex flex-col justify-center min-w-0">
+      <div className="flex-1 flex flex-col justify-center min-w-0 pl-2">
         <span className={`text-[11px] font-bold truncate transition-all duration-300 ${item.isCompleted ? 'text-emerald-700/60 line-through' : 'text-slate-700'
           }`}>
           {item.title}
@@ -170,10 +171,19 @@ const SortableSubtaskItem = ({ item, onToggle, canEdit = true, onDelete }) => {
       </div>
 
       <div className="flex items-center justify-end gap-6">
-        <div className="flex items-center justify-end gap-2 w-[160px]">
-          {item.date && item.date !== '-' && (
+        <div className="flex items-center justify-end w-[160px]">
+          {item.createdTime && (
             <div className="flex items-center gap-1.5 text-[8px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">
-              <Clock size={10} />
+              <Calendar size={12} className="text-slate-300" />
+              {item.createdTime}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end w-[160px]">
+          {(item.updatedTime || item.date) && (
+            <div className="flex items-center gap-1.5 text-[8px] font-bold text-indigo-500 uppercase tracking-widest whitespace-nowrap">
+              <Clock size={12} className="text-indigo-400" />
               {item.updatedTime ? item.updatedTime : item.date}
             </div>
           )}
@@ -181,7 +191,7 @@ const SortableSubtaskItem = ({ item, onToggle, canEdit = true, onDelete }) => {
             <IconButton
               size="small"
               onClick={(e) => { e.stopPropagation(); onDelete(item); }}
-              className="w-6 h-6 rounded text-slate-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover/item:opacity-100 transition-all"
+              className="ml-2 w-6 h-6 rounded text-slate-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover/item:opacity-100 transition-all"
             >
               <Trash2 size={13} />
             </IconButton>
@@ -200,6 +210,9 @@ const SortableSubtaskItem = ({ item, onToggle, canEdit = true, onDelete }) => {
             <Check size={11} strokeWidth={3} className={`transition-transform duration-300 ${item.isCompleted ? 'scale-100' : 'scale-0'}`} />
           </button>
         </div>
+        
+        {/* Trailing spacer to match group arrow column */}
+        <div className="w-[28px]" />
       </div>
     </div>
   );
@@ -222,21 +235,27 @@ const SortableGroup = ({ group, index, expanded, onToggle, onAddItem, isLast, on
         <div className="w-full flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             {canEdit ? (
-              <div {...attributes} {...listeners} className="p-1 text-slate-200 cursor-grab active:cursor-grabbing opacity-0 group-hover/header:opacity-100 transition-opacity">
+              <div {...attributes} {...listeners} className="w-8 flex items-center justify-center text-slate-200 cursor-grab active:cursor-grabbing opacity-0 group-hover/header:opacity-100 transition-opacity">
                 <GripVertical size={14} />
               </div>
             ) : (
-              <div className="p-1 text-transparent">
-                <GripVertical size={14} />
-              </div>
+              <div className="w-8" />
             )}
             <div className="w-6 h-6 rounded bg-white text-primary border border-primary/10 flex items-center justify-center font-bold text-[10px]">
               {index + 1}
             </div>
-            <h4 className="text-[12px] font-bold text-slate-900 tracking-tight">{group.title}</h4>
+            <h4 className="text-[12px] font-bold text-slate-900 tracking-tight ml-2">{group.title}</h4>
           </div>
 
           <div className="flex items-center justify-end gap-6">
+            <div className="flex items-center justify-end w-[160px]">
+              {group.createdTime && (
+                <div className="flex items-center gap-1.5 text-[8px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">
+                  <Calendar size={12} className="text-slate-300" />
+                  {group.createdTime}
+                </div>
+              )}
+            </div>
             <div className="flex items-center justify-end gap-1 w-[160px]">
               <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md border ${group.items.length > 0 && group.items.every(i => i.isCompleted) ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>
                 {group.items.filter(i => i.isCompleted).length}/{group.items.length} DONE
@@ -303,7 +322,7 @@ const SortableGroup = ({ group, index, expanded, onToggle, onAddItem, isLast, on
       </div>
 
       <Collapse in={expanded}>
-        <div className="bg-white pl-8">
+        <div className="bg-white">
           <SortableContext items={group.items.map(i => i.id)} strategy={verticalListSortingStrategy}>
             {group.items.map(item => (
               <SortableSubtaskItem key={item.id} item={item} onToggle={(id) => onToggleGroup(group.id, id)} canEdit={canEdit} onDelete={canEdit && onDeleteSubtask ? (itm) => onDeleteSubtask(itm) : undefined} />
@@ -835,28 +854,26 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
 
         {/* Main Workspace */}
         <div className="flex-1 flex flex-col gap-5 w-full">
-          <div className="flex flex-col gap-4">
-            {/* UNIFIED MINIMAL CHIP HEADER */}
-            <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm flex items-center justify-between gap-6">
-              <div className="flex flex-col gap-1.5 flex-1 min-w-0">
-                <div className="flex items-center gap-3">
-                  <h1 className="text-xl font-bold text-slate-900 tracking-tight leading-none truncate">{activeTask.title}</h1>
-                  <PriorityBadge priority={activeTask.priority} />
-                  {unresolvedChanges && (
-                    <span className="text-[9px] font-black px-2.5 py-1 bg-red-50 text-red-500 border border-red-100 rounded-lg uppercase tracking-widest animate-pulse">
-                      Changes Requested
-                    </span>
-                  )}
-                  {activeTask.needs_changes && !unresolvedChanges && (
-                    <span className="text-[9px] font-black px-2.5 py-1 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-lg uppercase tracking-widest">
-                      Changes Resolved
-                    </span>
-                  )}
-                </div>
+            <div className="flex flex-col gap-4">
+              {/* Task Title Section */}
+              <div className="flex items-center gap-3 px-1">
+                <h1 className="text-2xl font-black text-slate-900 tracking-tight leading-tight">{activeTask.title}</h1>
+                <PriorityBadge priority={activeTask.priority} />
+                {unresolvedChanges && (
+                  <span className="text-[10px] font-black px-3 py-1 bg-red-50 text-red-500 border border-red-100 rounded-full uppercase tracking-widest animate-pulse">
+                    Changes Requested
+                  </span>
+                )}
+                {activeTask.needs_changes && !unresolvedChanges && (
+                  <span className="text-[10px] font-black px-3 py-1 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-full uppercase tracking-widest">
+                    Changes Resolved
+                  </span>
+                )}
               </div>
 
-              {/* Vertical Dividers + Metadata Chips */}
-              <div className="flex items-center gap-8 h-10 pr-2">
+              {/* UNIFIED MINIMAL METADATA BAR */}
+              <div className="bg-white p-4 rounded-[24px] border border-slate-100 shadow-sm flex items-center justify-between gap-6 overflow-x-auto no-scrollbar">
+                <div className="flex items-center gap-8 h-10 pr-2">
                 {/* Assignee & Assigner Context */}
                 <div className="flex items-center gap-6">
                   <div className="flex flex-col">
@@ -1003,10 +1020,13 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
               </div>
 
               <div className="bg-white rounded-[24px] border border-slate-100 shadow-sm overflow-hidden">
-                <div className="flex items-center gap-4 py-2.5 pl-20 pr-4 bg-slate-50/50 border-b border-slate-100 text-[9px] font-bold text-slate-400 uppercase tracking-[0.1em]">
-                  <span className="flex-1">Task Description</span>
+                <div className="flex items-center gap-4 py-2.5 px-4 bg-slate-50/50 border-b border-slate-100 text-[9px] font-bold text-slate-400 uppercase tracking-[0.1em]">
+                  <div className="w-8" /> {/* Grip Spacer */}
+                  <div className="w-6" /> {/* Index Spacer */}
+                  <span className="flex-1 ml-2">Task Description</span>
                   <div className="flex items-center justify-end gap-6">
-                    <span className="w-[160px]">Updated At</span>
+                    <span className="w-[160px] text-right">Created At</span>
+                    <span className="w-[160px] text-right">Updated At</span>
                     <span className="w-[48px] text-center">Status</span>
                     <span className="w-[28px]"></span>
                   </div>
@@ -1317,8 +1337,8 @@ const TaskGrid = ({ tasks, onTaskClick, onTaskMenuClick, currentUserId, onSubmit
           <div
             key={task.id}
             onClick={() => onTaskClick(task)}
-            className={`rounded-[24px] p-5 border transition-all cursor-pointer group relative flex flex-col h-full ${task.status === 'done' 
-              ? 'bg-emerald-100/50 border-emerald-200 shadow-sm shadow-emerald-50' 
+            className={`rounded-[24px] p-5 border transition-all cursor-pointer group relative flex flex-col h-full ${task.status === 'done'
+              ? 'bg-emerald-100/50 border-emerald-200 shadow-sm shadow-emerald-50'
               : 'bg-white border-slate-100 hover:border-primary/20 hover:shadow-premium'
               }`}
           >
@@ -1345,9 +1365,8 @@ const TaskGrid = ({ tasks, onTaskClick, onTaskMenuClick, currentUserId, onSubmit
                   </span>
                 </div>
               </div>
-              
-              <div className="flex items-center gap-2 shrink-0 ml-2">
-                <StatusChip status={task.status} />
+
+              <div className="flex flex-col items-end gap-1 shrink-0 ml-2">
                 <IconButton
                   size="small"
                   className="text-slate-200 opacity-0 group-hover:opacity-100 transition-opacity p-1"
@@ -1358,6 +1377,7 @@ const TaskGrid = ({ tasks, onTaskClick, onTaskMenuClick, currentUserId, onSubmit
                 >
                   <MoreVertical size={16} />
                 </IconButton>
+                <StatusChip status={task.status} />
               </div>
             </div>
 
@@ -1429,8 +1449,8 @@ const TaskGrid = ({ tasks, onTaskClick, onTaskMenuClick, currentUserId, onSubmit
                 )}
               </div>
             ) : null}
-                {task.status === 'review' && !isAssigner && (
-                  <p className="text-center text-[9px] text-amber-500 font-bold">⏳ In Review</p>
+            {task.status === 'review' && !isAssigner && (
+              <p className="text-center text-[9px] text-amber-500 font-bold">⏳ In Review</p>
             )}
           </div>
         );
@@ -1503,8 +1523,8 @@ const TaskDetailedList = ({ tasks, onTaskClick, onTaskMenuClick, currentUserId }
           <div
             key={task.id}
             onClick={() => onTaskClick(task)}
-            className={`rounded-[24px] p-6 border transition-all cursor-pointer group flex items-center gap-8 ${task.status === 'done' 
-              ? 'bg-emerald-100/40 border-emerald-200 shadow-sm shadow-emerald-50' 
+            className={`rounded-[24px] p-6 border transition-all cursor-pointer group flex items-center gap-8 ${task.status === 'done'
+              ? 'bg-emerald-100/40 border-emerald-200 shadow-sm shadow-emerald-50'
               : 'bg-white border-slate-100 hover:border-primary/20 hover:shadow-lg'
               }`}
           >
@@ -1831,10 +1851,10 @@ const MyTasks = () => {
                   >
                     <Filter size={18} className="text-slate-400" />
                     <span className="text-[10px] font-black uppercase tracking-widest text-slate-600">
-                      {statusFilter === 'all' ? 'All Tasks' : 
-                       statusFilter === 'pending' ? 'Pending Tasks' : 
-                       statusFilter === 'in_progress' ? 'In Progress Tasks' : 
-                       'Completed Tasks'}
+                      {statusFilter === 'all' ? 'All Tasks' :
+                        statusFilter === 'pending' ? 'Pending Tasks' :
+                          statusFilter === 'in_progress' ? 'In Progress Tasks' :
+                            'Completed Tasks'}
                     </span>
                     <ChevronDownIcon size={14} className="text-slate-300" />
                   </button>

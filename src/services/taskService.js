@@ -8,8 +8,8 @@ import { supabase } from '../lib/supabaseClient';
 const TASK_SELECT = `
   *,
   task_groups ( 
-    id, title, is_completed, sort_order, updated_at, is_deleted, deleted_at,
-    subtasks ( id, title, is_completed, due_date, sort_order, updated_at, is_deleted, deleted_at ) 
+    id, title, is_completed, sort_order, updated_at, created_at, is_deleted, deleted_at,
+    subtasks ( id, title, is_completed, due_date, sort_order, updated_at, created_at, is_deleted, deleted_at ) 
   ),
   assignee:profiles!assigned_to ( 
     id, full_name, employee_id, department_id, 

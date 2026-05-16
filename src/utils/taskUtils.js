@@ -3,6 +3,22 @@
  * Centralized to be used by both MyTasks and AdminTaskView.
  * Filters out soft-deleted groups and subtasks automatically.
  */
+const formatDate = (dateStr) => {
+  if (!dateStr) return null;
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return null;
+    return new Intl.DateTimeFormat('en-US', { 
+      day: 'numeric', 
+      month: 'short', 
+      hour: 'numeric', 
+      minute: 'numeric' 
+    }).format(d);
+  } catch (e) {
+    return null;
+  }
+};
+
 export const normalizeTask = (t) => ({
   ...t,
   assignedToName: t.assignee?.full_name || 'Unassigned',
@@ -15,6 +31,7 @@ export const normalizeTask = (t) => ({
     .map(g => ({
       ...g,
       isCompleted: g.is_completed,
+      createdTime: formatDate(g.created_at || g.updated_at),
       items: (g.subtasks || [])
         .filter(s => !s.is_deleted)
         .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.id.localeCompare(b.id))
@@ -24,9 +41,11 @@ export const normalizeTask = (t) => ({
           date: s.due_date 
             ? new Date(s.due_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) 
             : s.updated_at ? new Date(s.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : 'No date',
-          updatedTime: s.updated_at ? new Intl.DateTimeFormat('en-US', { day: 'numeric', month: 'short', hour: 'numeric', minute: 'numeric' }).format(new Date(s.updated_at)) : null,
+          updatedTime: formatDate(s.updated_at),
+          createdTime: formatDate(s.created_at || s.updated_at),
         }))
-    }))
+    })),
+  createdTime: formatDate(t.created_at),
 });
 
 export const TASK_STATUS_STYLES = {
