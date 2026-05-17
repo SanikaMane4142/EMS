@@ -1,0 +1,16 @@
+{
+  "name": "ems-office-heartbeat",
+  "version": "1.0.0",
+  "description": "Office IP heartbeat service — keeps Supabase updated with the current office public IP",
+  "main": "heartbeat.js",
+  "scripts": {
+    "start": "node heartbeat.js",
+    "dev": "node --watch heartbeat.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

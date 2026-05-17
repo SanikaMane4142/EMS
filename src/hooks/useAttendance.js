@@ -159,3 +159,25 @@ export const useIpValidity = () => {
   });
 };
 
+/**
+ * Poll the office_ip_heartbeat table every 60s.
+ * Used by IpManagement.jsx to show live heartbeat health status.
+ */
+export const useHeartbeatStatus = () => {
+  return useQuery({
+    queryKey: ['attendance', 'heartbeat_status'],
+    queryFn: () => attendanceService.getHeartbeatStatus(),
+    refetchInterval: 60000, // Refresh every 60s
+  });
+};
+
+/**
+ * Fetch the IP change audit log (admin/HR only).
+ */
+export const useIpChangeLogs = (limit = 30) => {
+  return useQuery({
+    queryKey: ['attendance', 'ip_change_logs', limit],
+    queryFn: () => attendanceService.getIpChangeLogs(limit),
+  });
+};
+
