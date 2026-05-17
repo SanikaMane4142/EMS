@@ -73,6 +73,21 @@ export const reportService = {
   },
 
   /**
+   * Get report for a specific user and date
+   */
+  async getReportByDateForUser(userId, date) {
+    const { data, error } = await supabase
+      .from('daily_reports')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('report_date', date)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data;
+  },
+
+  /**
    * [HR/ADMIN] Get all reports across the system
    */
   async getAllReports(limit = 100) {

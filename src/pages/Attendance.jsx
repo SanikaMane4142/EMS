@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Box, Avatar } from '@mui/material';
 import {
   UserCheck, UserX, Clock, Download, Calendar, Search,
@@ -12,6 +12,45 @@ import { useDepartments } from '../hooks/useDepartments';
 import { useEmployees } from '../hooks/useEmployees';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-hot-toast';
+
+// --- Timer Helpers ---
+const formatMs = (ms) => {
+  if (!ms || ms < 0) return '00:00:00';
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  return [h, m, s].map(n => String(n).padStart(2, '0')).join(':');
+};
+
+const calcElapsedMs = (rec, nowTick) => {
+  if (!rec?.punch_in_time) return 0;
+  const now = nowTick || Date.now();
+  let diff = now - new Date(rec.punch_in_time).getTime();
+
+  if (rec.lunch_duration_ms) {
+    diff -= rec.lunch_duration_ms;
+  }
+
+  if (rec.lunch_start_time && !rec.lunch_end_time) {
+    const ongoingLunchMs = now - new Date(rec.lunch_start_time).getTime();
+    diff -= ongoingLunchMs;
+  }
+
+  return diff > 0 ? diff : 0;
+};
+
+const getDurationString = (row, nowTick) => {
+  if (row.rawStatus === 'punched_in') {
+    const ms = calcElapsedMs(row, nowTick);
+    return formatMs(ms);
+  } else if (row.punch_in_time && row.punch_out_time) {
+    const diffMs = new Date(row.punch_out_time) - new Date(row.punch_in_time);
+    const ms = Math.max(0, diffMs - (row.lunch_duration_ms || 0));
+    return formatMs(ms);
+  }
+  return '--';
+};
+
 
 // --- Styled Components / Constants ---
 const STATUS_CONFIG = {
@@ -27,6 +66,15 @@ const STATUS_CONFIG = {
 
 const Attendance = () => {
   const { profile } = useAuth();
+
+  const [timeTick, setTimeTick] = useState(Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTimeTick(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Filtering State
   const today = new Date().toLocaleDateString('en-CA');
@@ -339,6 +387,7 @@ const Attendance = () => {
             <thead>
               <tr className="bg-slate-50/50 border-b border-slate-100">
                 <th className="px-8 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Employee</th>
+                <th className="px-6 py-5 text-center text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Time</th>
                 <th className="px-6 py-5 text-center text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Punch In</th>
                 <th className="px-6 py-5 text-center text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Punch Out</th>
                 <th className="px-6 py-5 text-center text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Lunch</th>
@@ -352,7 +401,7 @@ const Attendance = () => {
                 // Skeleton loading rows
                 [...Array(5)].map((_, i) => (
                   <tr key={i} className="animate-pulse">
-                    <td colSpan={hasPendingActions ? 7 : 6} className="px-8 py-10">
+                    <td colSpan={hasPendingActions ? 8 : 7} className="px-8 py-10">
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 bg-slate-100 rounded-2xl" />
                         <div className="space-y-2">
@@ -395,6 +444,23 @@ const Attendance = () => {
                         </div>
                       </div>
                     </td>
+
+                    {/* Time (Live Timer / Total Shift Duration) */}
+                    <td className="px-6 py-5 text-center">
+                      {row.rawStatus === 'punched_in' ? (
+                        <div className="inline-flex items-center gap-1.5 py-1.5 px-3 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-100 font-mono text-[11px] font-black tracking-wide">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                          <span>{getDurationString(row, timeTick)}</span>
+                        </div>
+                      ) : ['punched_out', 'auto_punched_out'].includes(row.rawStatus) || (row.punch_in_time && row.punch_out_time) ? (
+                        <div className="inline-flex items-center gap-1.5 py-1.5 px-3 bg-slate-50 text-slate-700 rounded-xl border border-slate-100/50 font-mono text-[11px] font-black tracking-wide">
+                          <span>{getDurationString(row, timeTick)}</span>
+                        </div>
+                      ) : (
+                        <span className="text-slate-300 text-xs font-semibold">--</span>
+                      )}
+                    </td>
+
 
                     {/* Timing Details */}
                     <td className="px-6 py-5 text-center">
@@ -482,7 +548,7 @@ const Attendance = () => {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={hasPendingActions ? 7 : 6} className="px-8 py-20 text-center">
+                  <td colSpan={hasPendingActions ? 8 : 7} className="px-8 py-20 text-center">
                     <div className="flex flex-col items-center">
                       <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-4">
                         <Search size={32} className="text-slate-200" />

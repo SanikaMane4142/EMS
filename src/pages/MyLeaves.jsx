@@ -12,6 +12,8 @@ import Swal from 'sweetalert2';
 const MyLeaves = () => {
   const { user, profile } = useAuth();
   const [showApplyDialog, setShowApplyDialog] = useState(false);
+  const [modalMode, setModalMode] = useState('apply'); // 'apply', 'view', 'edit'
+  const [selectedLeaveId, setSelectedLeaveId] = useState(null);
   const [activeFilter, setActiveFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [loading, setLoading] = useState(true);
@@ -86,6 +88,48 @@ const MyLeaves = () => {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
+  const handleOpenApply = () => {
+    setModalMode('apply');
+    setFormData({ type: 'casual_leave', start: '', end: '', reason: '', medicalFile: null });
+    setSelectedLeaveId(null);
+    setShowApplyDialog(true);
+  };
+
+  const handleOpenView = (item) => {
+    setModalMode('view');
+    setFormData({
+      type: item.leave_type,
+      start: item.start_date,
+      end: item.end_date,
+      reason: item.reason,
+      medicalFile: null
+    });
+    setSelectedLeaveId(item.id);
+    setShowApplyDialog(true);
+  };
+
+  const handleDeleteLeave = (id) => {
+    Swal.fire({
+      title: 'Are you sure?',
+      text: "Do you want to delete this leave request?",
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#ef4444',
+      cancelButtonColor: '#64748b',
+      confirmButtonText: 'Yes, delete it!'
+    }).then(async (result) => {
+      if (result.isConfirmed) {
+        try {
+          await leaveService.deleteLeave(id);
+          toast.success('Leave request deleted successfully');
+          fetchHistory();
+        } catch (err) {
+          toast.error(err.message || 'Failed to delete leave request');
+        }
+      }
+    });
+  };
+
   const handleSubmit = async () => {
     if (!formData.start || !formData.end || !formData.reason) {
       return toast.error('Please fill all fields');
@@ -111,8 +155,8 @@ const MyLeaves = () => {
         reason: formData.reason,
         medical_doc_url: medicalUrl
       });
-
       toast.success('Leave request submitted!');
+
       setShowApplyDialog(false);
       setFormData({ type: 'casual_leave', start: '', end: '', reason: '', medicalFile: null });
       fetchHistory();
@@ -125,7 +169,8 @@ const MyLeaves = () => {
 
   const filteredHistory = leaves.filter(item => {
     const matchesType = activeFilter === 'All' || item.leave_type === activeFilter;
-    const matchesStatus = statusFilter === 'All' || item.status === statusFilter.toLowerCase();
+    const computedStatus = item.is_deleted ? 'deleted' : item.status.toLowerCase();
+    const matchesStatus = statusFilter === 'All' || computedStatus === statusFilter.toLowerCase();
     return matchesType && matchesStatus;
   });
 
@@ -133,7 +178,7 @@ const MyLeaves = () => {
   return (
     <div>
       <PageHeader title="Leave Management" subtitle="Manage and track your time off requests">
-        <button className="btn-ems btn-ems-primary" onClick={() => setShowApplyDialog(true)}>
+        <button className="btn-ems btn-ems-primary" onClick={handleOpenApply}>
           <FilePlus size={18} /> Apply for Leave
         </button>
       </PageHeader>
@@ -188,6 +233,7 @@ const MyLeaves = () => {
               <option value="Pending">Pending</option>
               <option value="Approved">Approved</option>
               <option value="Rejected">Rejected</option>
+              <option value="Deleted">Deleted/Canceled</option>
             </select>
           </div>
         </div>
@@ -219,13 +265,12 @@ const MyLeaves = () => {
                 </div>
 
                 <div className="flex items-center gap-6">
-                  <span className={`badge-pill ${item.status === 'approved' ? 'success' : item.status === 'rejected' ? 'danger' : 'warning'}`}>
-                    {item.status.toUpperCase()}
+                  <span className={`badge-pill ${item.is_deleted ? 'danger' : item.status === 'approved' ? 'success' : item.status === 'rejected' ? 'danger' : 'warning'}`}>
+                    {item.is_deleted ? 'DELETED' : item.status.toUpperCase()}
                   </span>
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button className="btn-icon-ems"><Eye size={16} /></button>
-                    {item.status === 'pending' && <button className="btn-icon-ems text-indigo-600"><Edit3 size={16} /></button>}
-                    <button className="btn-icon-ems text-red-500"><XCircle size={16} /></button>
+                    <button className="btn-icon-ems" onClick={() => handleOpenView(item)}><Eye size={16} /></button>
+                    {!item.is_deleted && (item.status === 'pending' || item.status === 'pending_hr' || item.status === 'pending_super_admin') && <button className="btn-icon-ems text-red-500" onClick={() => handleDeleteLeave(item.id)}><Trash2 size={16} /></button>}
                   </div>
                 </div>
               </div>
@@ -235,17 +280,17 @@ const MyLeaves = () => {
               <Calendar size={48} className="mx-auto text-slate-200 mb-4" />
               <h3 className="text-base font-bold text-slate-900 mb-1">No leave records found</h3>
               <p className="text-sm text-slate-500 mb-6">You haven't applied for any leaves yet.</p>
-              <button className="btn-ems btn-ems-primary !px-8" onClick={() => setShowApplyDialog(true)}>Apply Now</button>
+              <button className="btn-ems btn-ems-primary !px-8" onClick={handleOpenApply}>Apply Now</button>
             </div>
           )}
         </div>
       </Box>
 
-      {/* Apply Leave Dialog */}
+      {/* Apply/Edit/View Leave Dialog */}
       <Dialog open={showApplyDialog} onClose={() => setShowApplyDialog(false)} maxWidth="sm" fullWidth
         slotProps={{ paper: { sx: { borderRadius: '20px', p: 1 } } }}>
         <DialogTitle sx={{ fontWeight: 800, fontFamily: 'Inter', display: 'flex', justifyContent: 'space-between', alignItems: 'center', pb: 1 }}>
-          Apply for Leave
+          {modalMode === 'apply' ? 'Apply for Leave' : 'View Leave Details'}
           <IconButton onClick={() => setShowApplyDialog(false)} size="small"><X size={20} /></IconButton>
         </DialogTitle>
         <DialogContent>
@@ -257,6 +302,7 @@ const MyLeaves = () => {
                 name="type"
                 value={formData.type}
                 onChange={handleInputChange}
+                disabled={modalMode === 'view'}
               >
                 {Object.entries(leaveTypeConfig).map(([key, config]) => (
                   <option key={key} value={key}>{config.label}</option>
@@ -280,6 +326,7 @@ const MyLeaves = () => {
                   name="start"
                   value={formData.start}
                   onChange={handleInputChange}
+                  disabled={modalMode === 'view'}
                 />
               </div>
               <div>
@@ -290,6 +337,7 @@ const MyLeaves = () => {
                   name="end"
                   value={formData.end}
                   onChange={handleInputChange}
+                  disabled={modalMode === 'view'}
                 />
               </div>
             </div>
@@ -310,9 +358,10 @@ const MyLeaves = () => {
                 <label className="text-xs font-bold text-blue-700 uppercase tracking-widest block mb-2">Medical Certificate (Mandatory)</label>
                 <input
                   type="file"
-                  className="text-xs text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-black file:bg-blue-600 file:text-white hover:file:bg-blue-700"
+                  className="text-xs text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-black file:bg-blue-600 file:text-white hover:file:bg-blue-700 disabled:opacity-50"
                   onChange={(e) => setFormData(prev => ({ ...prev, medicalFile: e.target.files[0] }))}
                   accept=".pdf,.jpg,.png,.docx"
+                  disabled={modalMode === 'view'}
                 />
                 <p className="text-[10px] text-blue-500 mt-2">Required for sick leave of 2 or more days.</p>
               </div>
@@ -321,20 +370,25 @@ const MyLeaves = () => {
               <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Reason for Leave</label>
               <textarea
                 className="form-input-ems"
-                rows="3"
+                rows="5"
                 name="reason"
                 value={formData.reason}
                 onChange={handleInputChange}
                 placeholder="Provide a clear reason..."
+                disabled={modalMode === 'view'}
               ></textarea>
             </div>
           </div>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 3 }}>
-          <button className="btn-ems btn-ems-secondary" onClick={() => setShowApplyDialog(false)}>Cancel</button>
-          <button className="btn-ems btn-ems-primary !px-8" disabled={loading} onClick={handleSubmit}>
-            {loading ? 'Submitting...' : 'Submit Request'}
+          <button className="btn-ems btn-ems-secondary" onClick={() => setShowApplyDialog(false)}>
+            {modalMode === 'view' ? 'Close' : 'Cancel'}
           </button>
+          {modalMode !== 'view' && (
+            <button className="btn-ems btn-ems-primary !px-8" disabled={submitting} onClick={handleSubmit}>
+              {submitting ? 'Submitting...' : 'Submit Request'}
+            </button>
+          )}
         </DialogActions>
       </Dialog>
 

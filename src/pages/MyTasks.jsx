@@ -377,6 +377,16 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
   const canEdit = (isAssignee || (isAssigner && !activeTask.is_acknowledged)) && activeTask.status !== 'done';
   const allDone = taskService.allSubtasksDone(taskGroups);
 
+  // Derive if active task is overdue (Due Date + 1 Day logic)
+  const isOverdue = useMemo(() => {
+    if (!activeTask?.deadline || activeTask?.status === 'done') return false;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dl = new Date(activeTask.deadline);
+    dl.setHours(0, 0, 0, 0);
+    return dl < today;
+  }, [activeTask?.deadline, activeTask?.status]);
+
   // Workflow Logic: Check if there are any unresolved "Changes Requested" comments
   const unresolvedChanges = comments.some(c =>
     c.message.includes('Changes Requested') && !c.is_resolved
@@ -904,7 +914,7 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
                     <span className="text-[11px] font-bold text-slate-900 whitespace-nowrap">
                       {activeTask.deadline ? new Date(activeTask.deadline).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'No deadline'}
                     </span>
-                    {activeTask.deadline && new Date(activeTask.deadline) < new Date() && activeTask.status !== 'done' && (
+                    {isOverdue && (
                       <span className="text-[8px] font-bold px-1.5 py-0.5 bg-red-100 text-red-500 rounded uppercase tracking-tighter">Overdue</span>
                     )}
                   </div>
@@ -1330,7 +1340,13 @@ const TaskGrid = ({ tasks, onTaskClick, onTaskMenuClick, currentUserId, onSubmit
       className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6"
     >
       {tasks.map((task) => {
-        const isOverdue = task.deadline && new Date(task.deadline) < new Date() && task.status !== 'done';
+        const isOverdue = task.deadline && (() => {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const dl = new Date(task.deadline);
+          dl.setHours(0, 0, 0, 0);
+          return dl < today;
+        })() && task.status !== 'done';
         const isAssigner = task.assigned_by === currentUserId;
         const isAssignee = task.assigned_to === currentUserId;
         return (

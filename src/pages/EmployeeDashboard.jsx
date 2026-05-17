@@ -33,10 +33,10 @@ const formatMs = (ms) => {
   return [h, m, s].map(n => String(n).padStart(2, '0')).join(':');
 };
 
-/** Derive elapsed ms directly from a punch_in_time string and lunch breaks */
-const calcElapsedMs = (rec) => {
+/** Derive elapsed ms directly from a punch_in_time string and lunch breaks, calibrated with clockDrift */
+const calcElapsedMs = (rec, clockDrift = 0) => {
   if (!rec?.punch_in_time) return 0;
-  const now = Date.now();
+  const now = Date.now() + clockDrift;
   let diff = now - new Date(rec.punch_in_time).getTime();
 
   if (rec.lunch_duration_ms) {
@@ -83,7 +83,29 @@ const EmployeeDashboard = () => {
   const [elapsedMs, setElapsedMs] = useState(0);
   const [lunchElapsedMs, setLunchElapsedMs] = useState(0);
   const [overtimeElapsedMs, setOvertimeElapsedMs] = useState(0);
+  const [clockDrift, setClockDrift] = useState(0);
   const [actionLoading, setActionLoading] = useState(false);
+
+  // Calibrate client clock against Supabase server to prevent premature auto punch-out from local clock drift
+  useEffect(() => {
+    const calibrateClock = async () => {
+      try {
+        const start = Date.now();
+        const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/`);
+        const dateHeader = res.headers.get('date');
+        if (dateHeader) {
+          const serverMs = new Date(dateHeader).getTime();
+          const latency = (Date.now() - start) / 2; // Estimate network latency
+          const calibratedDrift = (serverMs + latency) - Date.now();
+          setClockDrift(calibratedDrift);
+          console.log(`[Clock Calibration] Server time drift calibrated: ${calibratedDrift}ms`);
+        }
+      } catch (err) {
+        console.warn('[Clock Calibration] Failed to calibrate client clock:', err.message);
+      }
+    };
+    calibrateClock();
+  }, []);
   const [teamMembers, setTeamMembers] = useState([]);
   const [birthdays, setBirthdays] = useState([]);
   const [announcements, setAnnouncements] = useState([]);
@@ -159,17 +181,20 @@ const EmployeeDashboard = () => {
   // ── Timer Logic ────────────────────────────────────────────────────────────
   const startTimer = (rec) => {
     stopTimer();
-    setElapsedMs(calcElapsedMs(rec));
-    setLunchElapsedMs(rec?.lunch_start_time && !rec?.lunch_end_time ? Date.now() - new Date(rec.lunch_start_time).getTime() : 0);
-    setOvertimeElapsedMs(rec?.overtime_start_time ? Date.now() - new Date(rec.overtime_start_time).getTime() : 0);
+    setElapsedMs(calcElapsedMs(rec, clockDrift));
+    const getNow = () => Date.now() + clockDrift;
+
+    setLunchElapsedMs(rec?.lunch_start_time && !rec?.lunch_end_time ? getNow() - new Date(rec.lunch_start_time).getTime() : 0);
+    setOvertimeElapsedMs(rec?.overtime_start_time ? getNow() - new Date(rec.overtime_start_time).getTime() : 0);
 
     timerRef.current = setInterval(() => {
-      setElapsedMs(calcElapsedMs(rec));
+      setElapsedMs(calcElapsedMs(rec, clockDrift));
+      const calibratedNow = getNow();
       if (rec?.lunch_start_time && !rec?.lunch_end_time) {
-        setLunchElapsedMs(Date.now() - new Date(rec.lunch_start_time).getTime());
+        setLunchElapsedMs(calibratedNow - new Date(rec.lunch_start_time).getTime());
       }
       if (rec?.overtime_start_time && !rec?.overtime_end_time) {
-        setOvertimeElapsedMs(Date.now() - new Date(rec.overtime_start_time).getTime());
+        setOvertimeElapsedMs(calibratedNow - new Date(rec.overtime_start_time).getTime());
       }
     }, 1000);
   };
@@ -208,7 +233,7 @@ const EmployeeDashboard = () => {
       setOvertimeElapsedMs(0);
     }
     return () => stopTimer();
-  }, [record]);
+  }, [record, clockDrift]);
 
   // ── Auto Punch-Out at 8h 30m ────────────────────────────────────────────────
   // Watches elapsed time; fires once when it crosses AUTO_PUNCH_OUT_MS

@@ -1,12 +1,14 @@
 import React, { useState } from "react";
-import { Calendar, CheckCircle2, Clock, CalendarDays, TrendingUp, LayoutGrid, List, ChevronLeft, ChevronRight, Utensils } from "lucide-react";
-import { Box, Skeleton, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Tooltip } from '@mui/material';
+import { Calendar, CheckCircle2, Clock, CalendarDays, TrendingUp, LayoutGrid, List, ChevronLeft, ChevronRight, Utensils, Eye, X, Star, FileText, AlertCircle } from "lucide-react";
+import { Box, Skeleton, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Tooltip, IconButton, Avatar, Typography } from '@mui/material';
 import PageHeader from '../components/PageHeader';
 import StatCard from '../components/StatCard';
 import { useAuth } from '../context/AuthContext';
 import { useAttendanceHistory, useSubmitAbsenceReason } from '../hooks/useAttendance';
 import { useMyLeaves } from '../hooks/useLeaves';
 import { toast } from 'react-hot-toast';
+import { reportService } from '../services/reportService';
+import { useQuery } from '@tanstack/react-query';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -213,12 +215,41 @@ const CalendarView = ({ history }) => {
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 const MyAttendance = () => {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [filter, setFilter] = useState('month');
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'calendar'
   const [reasonDialogOpen, setReasonDialogOpen] = useState(false);
   const [selectedAttendance, setSelectedAttendance] = useState(null);
   const [absenceReason, setAbsenceReason] = useState('');
+  
+  // Work report modal states
+  const [selectedReport, setSelectedReport] = useState(null);
+  const [fetchingReport, setFetchingReport] = useState(false);
+
+  // Fetch report history for this employee to show submission status
+  const { data: reportHistory = [] } = useQuery({
+    queryKey: ['reports', 'history', user?.id],
+    queryFn: () => reportService.getReportHistory(user?.id, 100),
+    enabled: !!user?.id,
+  });
+
+  const submittedReportDates = new Set(reportHistory.map(r => r.report_date));
+
+  const handleViewReport = async (date) => {
+    try {
+      setFetchingReport(true);
+      const report = await reportService.getReportByDateForUser(user.id, date);
+      if (report) {
+        setSelectedReport(report);
+      } else {
+        toast.error('No work report submitted for this date.');
+      }
+    } catch (err) {
+      toast.error(err.message || 'Failed to fetch report');
+    } finally {
+      setFetchingReport(false);
+    }
+  };
 
   const getFilterParams = (f) => {
     switch (f) {
@@ -392,17 +423,19 @@ const MyAttendance = () => {
                   </th>
                   <th>Duration</th>
                   <th>Status</th>
+                  <th>Report Status</th>
+                  <th style={{ width: 100, textAlign: 'right' }}>Reports</th>
                 </tr>
               </thead>
               <tbody>
                 {historyLoading ? (
                   [1, 2, 3].map(i => (
                     <tr key={i}>
-                      <td colSpan="7"><Skeleton height={40} /></td>
+                      <td colSpan="9"><Skeleton height={40} /></td>
                     </tr>
                   ))
                 ) : history.length === 0 ? (
-                  <tr><td colSpan="7" className="text-center p-8 text-slate-400">No history found</td></tr>
+                  <tr><td colSpan="9" className="text-center p-8 text-slate-400">No history found</td></tr>
                 ) : history.map((row, i) => {
                   const lunchMin = lunchMinutes(row);
                   const lunchStart = lunchStartTime(row);
@@ -471,6 +504,31 @@ const MyAttendance = () => {
                           )}
                         </div>
                       </td>
+                      <td>
+                        {['punched_in', 'punched_out', 'auto_punched_out'].includes(row.status) ? (
+                          submittedReportDates.has(row.attendance_date) ? (
+                            <span className="badge-pill success">Submitted</span>
+                          ) : (
+                            <span className="badge-pill danger">Not Submitted</span>
+                          )
+                        ) : (
+                          <span className="text-slate-400 text-xs font-semibold">N/A</span>
+                        )}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <div className="flex justify-end items-center">
+                          <Tooltip title="View Daily Report">
+                            <button
+                              className="flex items-center justify-center rounded-xl border border-slate-200 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 hover:border-indigo-200 transition-all shadow-sm disabled:opacity-50"
+                              style={{ width: 38, height: 38 }}
+                              onClick={() => handleViewReport(row.attendance_date)}
+                              disabled={fetchingReport || row.status === 'on_leave' || row.status === 'absent_unjustified'}
+                            >
+                              <Eye size={18} />
+                            </button>
+                          </Tooltip>
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
@@ -500,6 +558,159 @@ const MyAttendance = () => {
             {submitAbsenceReasonMutation.isPending ? 'Submitting...' : 'Submit Reason'}
           </button>
         </DialogActions>
+      </Dialog>
+
+      {/* Report Detail Modal */}
+      <Dialog
+        open={!!selectedReport}
+        onClose={() => setSelectedReport(null)}
+        maxWidth="md"
+        fullWidth
+        slotProps={{
+          backdrop: { sx: { backdropFilter: 'blur(8px)', bgcolor: 'rgba(15, 23, 42, 0.3)' } },
+          paper: { sx: { borderRadius: '32px', overflow: 'hidden', border: 'none', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', maxWidth: 1000 } }
+        }}
+      >
+        {selectedReport && (
+          <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, minHeight: 500 }}>
+            {/* LEFT SIDEBAR */}
+            <Box sx={{
+              width: { xs: '100%', md: 320 },
+              bgcolor: '#f8fafc',
+              p: 4,
+              display: 'flex',
+              flexDirection: 'column',
+              position: 'relative',
+              overflow: 'hidden'
+            }}>
+              <Box sx={{ mb: 5 }}>
+                <Avatar sx={{
+                  width: 64, height: 64, bgcolor: '#6366f1',
+                  fontWeight: 900, fontSize: 24, mb: 2,
+                  boxShadow: '0 10px 15px -3px rgba(99, 102, 241, 0.3)'
+                }}>
+                  {profile?.full_name?.charAt(0) || user?.email?.charAt(0) || 'U'}
+                </Avatar>
+                <Typography sx={{ fontSize: '1.5rem', fontWeight: 900, color: '#0f172a', textTransform: 'uppercase', lineHeight: 1, mb: 0.5 }}>
+                  {profile?.full_name || 'Employee'}
+                </Typography>
+                <Typography sx={{ fontSize: '0.75rem', fontWeight: 700, color: '#94a3b8' }}>
+                  Daily Work Report
+                </Typography>
+                <Typography sx={{ fontSize: '0.875rem', fontWeight: 700, color: '#4f46e5', mt: 1 }}>
+                  {new Date(selectedReport.report_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+                </Typography>
+              </Box>
+
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, position: 'relative', zIndex: 1 }}>
+                {/* Productivity Card */}
+                <Box sx={{ p: 2.5, bgcolor: '#ffffff', borderRadius: '20px', border: '1px solid #f1f5f9', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Box sx={{ width: 40, height: 40, borderRadius: '12px', bgcolor: '#eef2ff', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+                    <Star size={20} color="#6366f1" style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }} />
+                  </Box>
+                  <Box>
+                    <Typography sx={{ fontSize: '10px', fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Productivity Score</Typography>
+                    <Typography sx={{ fontSize: '1.125rem', fontWeight: 900, color: '#0f172a' }}>{selectedReport.productivity_rating || 0} / 10</Typography>
+                    <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5 }}>
+                      {[1, 2, 3, 4, 5].map(star => (
+                        <Star
+                          key={star} size={12}
+                          fill={star <= Math.round((selectedReport.productivity_rating || 0) / 2) ? "#f59e0b" : "none"}
+                          color={star <= Math.round((selectedReport.productivity_rating || 0) / 2) ? "#f59e0b" : "#e2e8f0"}
+                        />
+                      ))}
+                    </Box>
+                  </Box>
+                </Box>
+
+                {/* Hours Card */}
+                <Box sx={{ p: 2.5, bgcolor: '#ffffff', borderRadius: '20px', border: '1px solid #f1f5f9', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Box sx={{ width: 40, height: 40, borderRadius: '12px', bgcolor: '#f5f3ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Clock size={20} color="#8b5cf6" />
+                  </Box>
+                  <Box>
+                    <Typography sx={{ fontSize: '10px', fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Hours Invested</Typography>
+                    <Typography sx={{ fontSize: '1.125rem', fontWeight: 900, color: '#0f172a' }}>{selectedReport.total_working_hours || 0} hrs</Typography>
+                  </Box>
+                </Box>
+              </Box>
+            </Box>
+
+            {/* RIGHT CONTENT */}
+            <Box sx={{ 
+              flex: 1, 
+              bgcolor: '#ffffff', 
+              p: { xs: 3, md: 5 }, 
+              display: 'flex', 
+              flexDirection: 'column',
+              maxHeight: '85vh' 
+            }}>
+              {/* Scrollable Content Area */}
+              <Box sx={{ 
+                flex: 1, 
+                display: 'flex', 
+                flexDirection: 'column', 
+                gap: 1,
+                overflowY: 'auto',
+                pr: 2,
+                mr: -2,
+                '&::-webkit-scrollbar': { width: '5px' },
+                '&::-webkit-scrollbar-track': { background: '#f8fafc' },
+                '&::-webkit-scrollbar-thumb': { background: '#e2e8f0', borderRadius: '10px' },
+                '&::-webkit-scrollbar-thumb:hover': { background: '#cbd5e1' }
+              }}>
+                {[
+                  { label: 'Tasks Planned Today', value: selectedReport.tasks_planned, icon: Calendar, color: '#3b82f6' },
+                  { label: 'Tasks Completed', value: selectedReport.tasks_completed, icon: CheckCircle2, color: '#10b981' },
+                  { label: 'Blockers / Notes', value: selectedReport.additional_notes || 'No blockers reported', icon: AlertCircle, color: '#f59e0b' },
+                  { label: 'Work In Progress', value: selectedReport.work_in_progress || 'N/A', icon: TrendingUp, color: '#60a5fa' },
+                  { label: 'Tomorrow\'s Plan', value: selectedReport.tomorrow_plan, icon: Calendar, color: '#6366f1' },
+                ].map((item, idx) => (
+                  <Box key={idx} sx={{
+                    display: 'flex', alignItems: 'flex-start', gap: 2.5, p: 2,
+                    borderRadius: '20px', '&:hover': { bgcolor: '#f8fafc' },
+                    transition: 'background-color 0.2s'
+                  }}>
+                    <Box sx={{
+                      width: 40, height: 40, borderRadius: '50%',
+                      bgcolor: item.color, color: '#ffffff',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      boxShadow: `0 4px 10px ${item.color}33`,
+                      flexShrink: 0,
+                      mt: 0.5
+                    }}>
+                      <item.icon size={18} />
+                    </Box>
+                    <Box sx={{
+                      flex: 1, display: 'flex', flexDirection: 'column', gap: 0.5,
+                      borderBottom: idx === 4 ? 'none' : '1px solid #f1f5f9', pb: 2
+                    }}>
+                      <Typography sx={{ fontSize: '0.875rem', fontWeight: 700, color: '#334155' }}>{item.label}</Typography>
+                      <Typography sx={{ fontSize: '0.875rem', fontWeight: 500, color: '#64748b', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                        {item.value}
+                      </Typography>
+                    </Box>
+                  </Box>
+                ))}
+              </Box>
+
+              <Box sx={{ mt: 5, pt: 3, borderTop: '1px solid #f1f5f9' }}>
+                <button
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    backgroundColor: '#eef2ff', color: '#4f46e5',
+                    padding: '10px 24px', borderRadius: '12px',
+                    fontSize: '0.75rem', fontWeight: 700, border: 'none',
+                    cursor: 'pointer'
+                  }}
+                  onClick={() => setSelectedReport(null)}
+                >
+                  <X size={14} /> Close View
+                </button>
+              </Box>
+            </Box>
+          </Box>
+        )}
       </Dialog>
     </div>
   );

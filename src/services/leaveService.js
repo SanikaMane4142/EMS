@@ -49,6 +49,54 @@ export const leaveService = {
   },
 
   /**
+   * Update an existing pending leave request
+   */
+  async updateLeave(requestId, leaveData) {
+    // 1. Calculate total days with sandwich logic (Monday is holiday)
+    const { totalDays, isSandwich } = await this.calculateLeaveDays(leaveData.start_date, leaveData.end_date);
+
+    let updatePayload = {
+      leave_type: leaveData.leave_type,
+      start_date: leaveData.start_date,
+      end_date: leaveData.end_date,
+      total_days: totalDays,
+      is_sandwich_applied: isSandwich,
+      reason: leaveData.reason,
+      is_lwp: leaveData.leave_type === 'lwp',
+      updated_at: new Date().toISOString()
+    };
+
+    if (leaveData.medical_doc_url) {
+      updatePayload.medical_doc_url = leaveData.medical_doc_url;
+    }
+
+    const { data, error } = await supabase
+      .from('leave_requests')
+      .update(updatePayload)
+      .eq('id', requestId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * Soft delete a leave request
+   */
+  async deleteLeave(requestId) {
+    const { data, error } = await supabase
+      .from('leave_requests')
+      .update({ is_deleted: true })
+      .eq('id', requestId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  /**
    * Fetch leave history for the logged-in user
    */
   async getMyLeaves(userId) {
@@ -77,6 +125,7 @@ export const leaveService = {
         hr:profiles!hr_id(id, full_name),
         super_admin:profiles!super_admin_id(id, full_name)
       `)
+      .is('is_deleted', false)
       .order('created_at', { ascending: false });
 
     if (error) throw error;

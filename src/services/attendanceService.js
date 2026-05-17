@@ -424,7 +424,12 @@ export const attendanceService = {
         lunchStart: item.lunch_start_time ? new Date(item.lunch_start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null,
         lunchEnd: item.lunch_end_time ? new Date(item.lunch_end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null,
         totalHours: item.total_hours || 0,
-        overtime: item.overtime_duration_ms ? parseFloat((item.overtime_duration_ms / 3600000).toFixed(2)) : 0
+        overtime: item.overtime_duration_ms ? parseFloat((item.overtime_duration_ms / 3600000).toFixed(2)) : 0,
+        punch_in_time: item.punch_in_time,
+        punch_out_time: item.punch_out_time,
+        lunch_start_time: item.lunch_start_time,
+        lunch_end_time: item.lunch_end_time,
+        lunch_duration_ms: item.lunch_duration_ms
       };
     });
   },
