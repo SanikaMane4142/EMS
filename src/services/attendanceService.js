@@ -71,12 +71,12 @@ export const attendanceService = {
    */
   async punchIn(userId) {
     validateDevice();
-    const { data, error } = await supabase.rpc('attendance_punch_in_v2', {
+    const { data, error } = await supabase.rpc('attendance_punch_in_v3', {
       p_user_id: userId,
     });
 
     if (error) throw error;
-    console.log('[Attendance] Punched in using server time');
+    console.log('[Attendance] Punched in via heartbeat-validated RPC v3');
     return data;
   },
 
@@ -114,13 +114,13 @@ export const attendanceService = {
     }
 
     // Manual punch-out — use server-side RPC
-    const { data, error } = await supabase.rpc('attendance_punch_out_v2', {
+    const { data, error } = await supabase.rpc('attendance_punch_out_v3', {
       p_record_id: recordId,
       p_lunch_duration_ms: lunchDurationMs || 0,
     });
 
     if (error) throw error;
-    console.log(`[Attendance] Punched out using server time. Status: ${data?.status}`);
+    console.log(`[Attendance] Punched out via heartbeat-validated RPC v3. Status: ${data?.status}`);
     return data;
   },
 
@@ -468,5 +468,34 @@ export const attendanceService = {
     const { data, error } = await supabase.rpc('check_ip_validity');
     if (error) throw error;
     return data;
+  },
+
+  /**
+   * Fetch the current heartbeat status from office_ip_heartbeat.
+   * Returns the latest record including IP, freshness, and heartbeat count.
+   */
+  async getHeartbeatStatus() {
+    const { data, error } = await supabase
+      .from('office_ip_heartbeat')
+      .select('*')
+      .eq('is_active', true)
+      .order('last_heartbeat_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * Fetch recent IP change log entries (admin/HR only).
+   */
+  async getIpChangeLogs(limit = 30) {
+    const { data, error } = await supabase
+      .from('ip_change_log')
+      .select('*')
+      .order('changed_at', { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return data || [];
   }
 };
