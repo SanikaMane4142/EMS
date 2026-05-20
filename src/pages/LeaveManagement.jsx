@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Avatar, Dialog, DialogTitle, DialogContent, DialogActions, IconButton, Skeleton, TextField, InputAdornment } from '@mui/material';
-import { Calendar, Check, X, Clock, CalendarOff, Plus, Search, User as UserIcon, Save, Shield, Info } from 'lucide-react';
+import { Calendar, Check, X, Clock, CalendarOff, Plus, Search, User as UserIcon, Save, Shield, Info, Eye, FileText, AlertTriangle } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import Swal from 'sweetalert2';
 import PageHeader from '../components/PageHeader';
@@ -18,6 +18,7 @@ const LeaveManagement = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [leaveForm, setLeaveForm] = useState({ type: 'casual_leave', start: '', end: '', reason: '' });
+  const [medicalFilter, setMedicalFilter] = useState('Submitted');
 
   // Credit Tab State
   const [searchId, setSearchId] = useState('');
@@ -141,6 +142,107 @@ const LeaveManagement = () => {
     }
   };
 
+  const handleVerifyDocument = async (requestId, status) => {
+    if (status === 'verified') {
+      Swal.fire({
+        title: 'Confirm Verification',
+        text: 'Are you sure you want to verify and approve this medical certificate?',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonColor: '#10b981',
+        cancelButtonColor: '#64748b',
+        confirmButtonText: 'Yes, Verify'
+      }).then(async (result) => {
+        if (result.isConfirmed) {
+          try {
+            setLoading(true);
+            await leaveService.verifyMedicalDoc(requestId, 'verified');
+            toast.success('Medical certificate verified successfully!');
+            fetchAllRequests();
+          } catch (err) {
+            toast.error(err.message || 'Failed to verify certificate');
+          } finally {
+            setLoading(false);
+          }
+        }
+      });
+    } else {
+      // Rejection flow - prompt for reason and extension
+      Swal.fire({
+        title: 'Reject Certificate',
+        html: `
+          <div class="text-left">
+            <label class="block text-xs font-black text-slate-500 uppercase mb-2">Rejection Reason</label>
+            <input id="reject-reason" class="swal2-input !w-full !m-0 !mb-4 text-sm" placeholder="e.g. Stamped date is missing" style="box-sizing: border-box;">
+            <div class="flex items-center gap-2 mt-2">
+              <input type="checkbox" id="grant-extension" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500">
+              <label for="grant-extension" class="text-xs font-bold text-slate-600">Grant 5-day grace extension for re-upload?</label>
+            </div>
+          </div>
+        `,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#ef4444',
+        cancelButtonColor: '#64748b',
+        confirmButtonText: 'Confirm Reject',
+        preConfirm: () => {
+          const reason = document.getElementById('reject-reason').value;
+          const extension = document.getElementById('grant-extension').checked;
+          if (!reason || !reason.trim()) {
+            Swal.showValidationMessage('Rejection reason is required');
+          }
+          return { reason, extension };
+        }
+      }).then(async (result) => {
+        if (result.isConfirmed) {
+          try {
+            setLoading(true);
+            const { reason, extension } = result.value;
+            await leaveService.verifyMedicalDoc(requestId, 'rejected', reason, extension);
+            toast.success('Medical certificate rejected.');
+            fetchAllRequests();
+          } catch (err) {
+            toast.error(err.message || 'Failed to reject certificate');
+          } finally {
+            setLoading(false);
+          }
+        }
+      });
+    }
+  };
+
+  const handleOverrideConversion = async (requestId) => {
+    Swal.fire({
+      title: 'Revert Conversion?',
+      text: 'This will restore the original Leave Type, refund any deducted Casual Leave, and set status to Verified. Reason for override is required.',
+      input: 'text',
+      inputPlaceholder: 'Provide reason for override...',
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonColor: '#635BFF',
+      cancelButtonColor: '#64748b',
+      confirmButtonText: 'Yes, Revert',
+      inputValidator: (value) => {
+        if (!value || !value.trim()) {
+          return 'Override reason is required!';
+        }
+      }
+    }).then(async (result) => {
+      if (result.isConfirmed) {
+        try {
+          setLoading(true);
+          await leaveService.overrideConversion(requestId, result.value);
+          toast.success('Leave conversion reverted successfully!');
+          fetchAllRequests();
+        } catch (err) {
+          toast.error(err.message || 'Failed to override conversion');
+        } finally {
+          setLoading(false);
+        }
+      }
+    });
+  };
+
   const filteredLeaves = requests.filter(req => {
     if (activeTab === 'Pending') return req.status.startsWith('pending');
     return req.status.toLowerCase() === activeTab.toLowerCase();
@@ -170,13 +272,19 @@ const LeaveManagement = () => {
 
       {/* Tabs */}
       <div className="tabs-ems mb-6">
-        {['Pending', 'Approved', 'Rejected', 'Leave Credit'].map(tab => (
+        {['Pending', 'Approved', 'Rejected', 'Medical Documents', 'Leave Credit'].map(tab => (
           <button key={tab} className={`tab-ems ${activeTab === tab ? 'active' : ''}`} onClick={() => setActiveTab(tab)}>
             {tab === 'Leave Credit' ? <Shield size={14} className="mr-2" /> : null}
+            {tab === 'Medical Documents' ? <FileText size={14} className="mr-2" /> : null}
             {tab}
             {tab === 'Pending' && requests.filter(r => r.status.startsWith('pending')).length > 0 && (
               <span className="ml-2 text-xs font-bold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">
                 {requests.filter(r => r.status.startsWith('pending')).length}
+              </span>
+            )}
+            {tab === 'Medical Documents' && requests.filter(r => r.medical_doc_status === 'medical_doc_submitted').length > 0 && (
+              <span className="ml-2 text-xs font-bold bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full font-black">
+                {requests.filter(r => r.medical_doc_status === 'medical_doc_submitted').length}
               </span>
             )}
           </button>
@@ -294,6 +402,175 @@ const LeaveManagement = () => {
                     </button>
                   </div>
                </div>
+            </div>
+          </div>
+        </Box>
+      ) : activeTab === 'Medical Documents' ? (
+        /* Medical Documents Tab */
+        <Box className="card-ems-static animate-in slide-in-from-bottom-2" sx={{ p: 0, overflow: 'hidden' }}>
+          <div className="p-6 border-b border-slate-100 bg-[#F8FAFC] flex justify-between items-center flex-wrap gap-4">
+            <div>
+              <h3 className="text-lg font-bold text-slate-900 mb-1">Medical Documents Verification</h3>
+              <p className="text-sm text-slate-500 font-medium">Verify certificates, monitor deadlines, and override leave conversions.</p>
+            </div>
+            
+            {/* Sub-Filters */}
+            <div className="flex gap-2 bg-slate-100 p-1 rounded-xl">
+              {[
+                { key: 'Submitted', label: 'Submitted', count: requests.filter(r => r.medical_doc_status === 'medical_doc_submitted').length },
+                { key: 'Pending', label: 'Pending Upload', count: requests.filter(r => r.medical_doc_status === 'medical_doc_pending' || r.medical_doc_status === 'medical_doc_rejected').length },
+                { key: 'Converted', label: 'Expired/Converted', count: requests.filter(r => r.medical_doc_status === 'medical_doc_expired' || r.is_converted).length }
+              ].map(sub => (
+                <button
+                  key={sub.key}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all ${
+                    medicalFilter === sub.key 
+                      ? 'bg-white text-slate-900 shadow-sm' 
+                      : 'text-slate-500 hover:text-slate-900'
+                  }`}
+                  onClick={() => setMedicalFilter(sub.key)}
+                >
+                  {sub.label} ({sub.count})
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="p-6">
+            <div className="table-responsive">
+              <table className="table-ems">
+                <thead>
+                  <tr>
+                    <th>Employee</th>
+                    <th>Leave Details</th>
+                    <th>Document Status</th>
+                    <th>Certificate</th>
+                    <th className="text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {requests.filter(req => {
+                    if (medicalFilter === 'Submitted') return req.medical_doc_status === 'medical_doc_submitted';
+                    if (medicalFilter === 'Pending') return req.medical_doc_status === 'medical_doc_pending' || req.medical_doc_status === 'medical_doc_rejected';
+                    if (medicalFilter === 'Converted') return req.medical_doc_status === 'medical_doc_expired' || req.is_converted;
+                    return false;
+                  }).length > 0 ? (
+                    requests.filter(req => {
+                      if (medicalFilter === 'Submitted') return req.medical_doc_status === 'medical_doc_submitted';
+                      if (medicalFilter === 'Pending') return req.medical_doc_status === 'medical_doc_pending' || req.medical_doc_status === 'medical_doc_rejected';
+                      if (medicalFilter === 'Converted') return req.medical_doc_status === 'medical_doc_expired' || req.is_converted;
+                      return false;
+                    }).map(leave => {
+                      const empName = leave.profiles?.full_name || 'Staff';
+                      const start = new Date(leave.start_date);
+                      const end = new Date(leave.end_date);
+                      const days = leave.total_days || (Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1);
+                      const deadline = leave.medical_doc_deadline ? new Date(leave.medical_doc_deadline) : null;
+                      
+                      return (
+                        <tr key={leave.id} className="hover:bg-slate-50">
+                          <td>
+                            <div className="flex items-center gap-3">
+                              <Avatar sx={{ width: 36, height: 36, bgcolor: '#eef2ff', color: '#4f46e5', fontWeight: 700 }}>
+                                {empName.charAt(0)}
+                              </Avatar>
+                              <div>
+                                <p className="text-sm font-bold text-slate-900">{empName}</p>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{leave.profiles?.departments?.name || 'Department'}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="text-xs font-semibold text-slate-700">
+                              <p className="font-bold text-slate-900">{leaveTypeConfig[leave.leave_type]?.label || leave.leave_type}</p>
+                              <p className="text-[10px] text-slate-500 mt-0.5">{start.toLocaleDateString()} - {end.toLocaleDateString()} ({days} Days)</p>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="flex flex-col gap-1">
+                              <span className={`badge-pill w-fit ${
+                                leave.medical_doc_status === 'medical_doc_verified' ? 'success' :
+                                leave.medical_doc_status === 'medical_doc_submitted' ? 'info' :
+                                leave.medical_doc_status === 'medical_doc_pending' ? 'warning' :
+                                leave.medical_doc_status === 'medical_doc_rejected' ? 'danger' : 'neutral'
+                              }`}>
+                                {leave.medical_doc_status === 'medical_doc_verified' ? 'VERIFIED' :
+                                 leave.medical_doc_status === 'medical_doc_submitted' ? 'AWAITING REVIEW' :
+                                 leave.medical_doc_status === 'medical_doc_pending' ? 'PENDING UPLOAD' :
+                                 leave.medical_doc_status === 'medical_doc_rejected' ? 'REJECTED' : 'EXPIRED'}
+                              </span>
+                              
+                              {deadline && (
+                                <span className="text-[10px] text-slate-400 font-medium">
+                                  Deadline: {deadline.toLocaleDateString()}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td>
+                            {leave.medical_doc_url ? (
+                              <a 
+                                href={leave.medical_doc_url} 
+                                target="_blank" 
+                                rel="noreferrer" 
+                                className="inline-flex items-center gap-1 text-[11px] font-black text-indigo-600 hover:underline bg-indigo-50 px-2 py-1 rounded-md"
+                              >
+                                <FileText size={12} /> View Certificate
+                              </a>
+                            ) : (
+                              <span className="text-xs text-slate-400 italic">No document</span>
+                            )}
+                          </td>
+                          <td className="text-right">
+                            <div className="flex justify-end gap-2">
+                              {leave.medical_doc_status === 'medical_doc_submitted' && (
+                                <>
+                                  <button 
+                                    className="btn-ems btn-ems-success !py-1.5 !px-3 !text-xs animate-in fade-in"
+                                    onClick={() => handleVerifyDocument(leave.id, 'verified')}
+                                  >
+                                    <Check size={14} /> Verify
+                                  </button>
+                                  <button 
+                                    className="btn-ems btn-ems-danger !py-1.5 !px-3 !text-xs animate-in fade-in"
+                                    onClick={() => handleVerifyDocument(leave.id, 'rejected')}
+                                  >
+                                    <X size={14} /> Reject
+                                  </button>
+                                </>
+                              )}
+                              
+                              {medicalFilter === 'Converted' && leave.is_converted && (
+                                <button 
+                                  className="btn-ems btn-ems-outline !py-1.5 !px-3 !text-xs animate-in fade-in"
+                                  onClick={() => handleOverrideConversion(leave.id)}
+                                >
+                                  <Shield size={14} /> Revert Conversion
+                                </button>
+                              )}
+                              
+                              {medicalFilter === 'Pending' && (
+                                <span className="text-[10px] font-bold text-slate-400 italic">
+                                  {Math.ceil((deadline - new Date()) / (1000 * 60 * 60 * 24)) > 0 
+                                    ? `${Math.ceil((deadline - new Date()) / (1000 * 60 * 60 * 24))} days left` 
+                                    : 'expired'}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan="5" className="py-12 text-center text-slate-400">
+                        <CalendarOff size={36} className="mx-auto mb-3 opacity-20" />
+                        <p className="text-xs font-bold uppercase tracking-wider">No records in this category.</p>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         </Box>

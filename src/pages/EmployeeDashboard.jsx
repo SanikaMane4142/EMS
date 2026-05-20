@@ -4,11 +4,16 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Box, Avatar, Chip, Skeleton, Modal, TextField, Typography, Button, useMediaQuery } from '@mui/material';
 import { toast } from 'react-hot-toast';
-import { Clock, Play, Square, CheckCircle, AlertTriangle, Users, Calendar, FileText, Send, Save, ChevronRight, CheckSquare, Sparkles, Monitor, Globe } from 'lucide-react';
+import { Clock, Play, Square, CheckCircle, AlertTriangle, Users, Calendar, FileText, Send, Save, ChevronRight, CheckSquare, Sparkles, Monitor, Globe, LogOut, X } from 'lucide-react';
 import StatCard from '../components/StatCard';
 
 // Hooks
-import { useActiveAttendance, useAttendanceHistory, usePunchIn, usePunchOut, useStartLunch, useResumeWork, useStartOvertime, useEndOvertime, useEmployeeDashboardStats, useIpValidity } from '../hooks/useAttendance';
+import {
+  useActiveAttendance, useAttendanceHistory, usePunchIn, usePunchOut,
+  useStartLunch, useResumeWork, useStartOvertime, useEndOvertime,
+  useEmployeeDashboardStats, useIpValidity,
+  useSubmitEarlyExitRequest, useMyEarlyExitRequest, useEmployeeApprovedEarlyPunchOut
+} from '../hooks/useAttendance';
 import { useTodayReport, useSubmitReport, useMonthlyReportCount } from '../hooks/useReports';
 import { useMyTasks } from '../hooks/useTasks';
 import { profileService } from '../services/profileService';
@@ -52,10 +57,31 @@ const calcElapsedMs = (rec, clockDrift = 0) => {
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const SHIFT_MS          = 8 * 60 * 60 * 1000;       // 8 hours    — regular paid hours
+const SHIFT_MS = 8 * 60 * 60 * 1000;       // 8 hours    — regular paid hours
 const AUTO_PUNCH_OUT_MS = 8.5 * 60 * 60 * 1000;     // 8h 30m     — auto punch-out trigger
-const HALF_DAY_MS       = 4 * 60 * 60 * 1000;       // 4 hours    — minimum for half-day
-const LUNCH_LIMIT_MS    = 60 * 60 * 1000;            // 1 hour     — lunch break limit
+const HALF_DAY_MS = 4 * 60 * 60 * 1000;       // 4 hours    — minimum for half-day
+const LUNCH_LIMIT_MS = 60 * 60 * 1000;            // 1 hour     — lunch break limit
+
+const FORCE_PUNCH_OUT_REASONS = [
+  'Work completed for today',
+  'Medical emergency',
+  'Personal emergency',
+  'Client meeting / offsite work',
+  'Approved flexible timing',
+  'Internet/electricity issue',
+  'System issue',
+  'Shift adjustment',
+  'Travel approval',
+  'Other',
+];
+
+const getGreeting = () => {
+  const hr = new Date().getHours();
+  if (hr < 12) return 'Good Morning';
+  if (hr < 16) return 'Good Afternoon';
+  if (hr < 20) return 'Good Evening';
+  return 'Welcome';
+};
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const EmployeeDashboard = () => {
@@ -76,15 +102,23 @@ const EmployeeDashboard = () => {
 
   const punchInMutation = usePunchIn();
   const punchOutMutation = usePunchOut();
-  // Note: we might need to add useStartLunch and useResumeWork to useAttendance.js if they don't exist
+  const submitEarlyExitMutation = useSubmitEarlyExitRequest();
+  const { data: earlyExitRequest, isLoading: earlyExitRequestLoading } = useMyEarlyExitRequest(record?.id);
+  const employeeApprovedEarlyPunchOutMutation = useEmployeeApprovedEarlyPunchOut();
+
+  // Local state for UI only
   // For now I'll assume they exist or I'll add them shortly.
 
   // Local state for UI only
+  const [showEarlyExitModal, setShowEarlyExitModal] = useState(false);
+  const [earlyExitForm, setEarlyExitForm] = useState({ reason: '', note: '' });
   const [elapsedMs, setElapsedMs] = useState(0);
   const [lunchElapsedMs, setLunchElapsedMs] = useState(0);
   const [overtimeElapsedMs, setOvertimeElapsedMs] = useState(0);
   const [clockDrift, setClockDrift] = useState(0);
   const [actionLoading, setActionLoading] = useState(false);
+  const [dismissedRejectionId, setDismissedRejectionId] = useState(null);
+  const [dismissedApprovalId, setDismissedApprovalId] = useState(null);
 
   // Calibrate client clock against Supabase server to prevent premature auto punch-out from local clock drift
   useEffect(() => {
@@ -149,10 +183,10 @@ const EmployeeDashboard = () => {
     // Realtime subscription for announcements
     const channel = supabase
       .channel('employee_announcements')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'announcements' 
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'announcements'
       }, () => {
         communicationService.getLatestAnnouncements(5).then(setAnnouncements);
       })
@@ -161,10 +195,10 @@ const EmployeeDashboard = () => {
     // Realtime subscription for team status (attendance changes)
     const teamChannel = supabase
       .channel('team_status')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'attendance' 
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'attendance'
       }, () => {
         if (profile?.department_id) {
           profileService.getDepartmentMembers(profile.department_id).then(setTeamMembers);
@@ -345,11 +379,17 @@ const EmployeeDashboard = () => {
 
     try {
       setActionLoading(true);
-      await punchOutMutation.mutateAsync({
-        recordId: record.id,
-        punchInTime: record.punch_in_time,
-        lunchDurationMs: record.lunch_duration_ms || 0
-      });
+      if (earlyExitRequest?.status === 'approved') {
+        await employeeApprovedEarlyPunchOutMutation.mutateAsync({
+          attendanceId: record.id
+        });
+      } else {
+        await punchOutMutation.mutateAsync({
+          recordId: record.id,
+          punchInTime: record.punch_in_time,
+          lunchDurationMs: record.lunch_duration_ms || 0
+        });
+      }
       toast.success('Punched out successfully!');
     } catch (err) {
       if (err.message.includes('IP_RESTRICTED')) {
@@ -373,6 +413,28 @@ const EmployeeDashboard = () => {
   };
 
 
+
+  const handleSubmitEarlyExitRequest = async () => {
+    if (!earlyExitForm.reason) { toast.error('Please select a reason.'); return; }
+    if (!earlyExitForm.note.trim()) { toast.error('Please enter a note.'); return; }
+
+    try {
+      setActionLoading(true);
+      await submitEarlyExitMutation.mutateAsync({
+        employeeId: user.id,
+        attendanceId: record.id,
+        reason: earlyExitForm.reason,
+        note: earlyExitForm.note.trim()
+      });
+      toast.success('Early exit request submitted. Waiting for HR approval.');
+      setShowEarlyExitModal(false);
+      setEarlyExitForm({ reason: '', note: '' });
+    } catch (err) {
+      toast.error(err.message || 'Failed to submit request.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   const handleStartLunch = async () => {
     if (!record?.id) return;
@@ -606,7 +668,7 @@ const EmployeeDashboard = () => {
       const allCompletedItems = [...completedItems, ...reviewItems];
 
       setReportData(prev => {
-        const PLANNED_HEADER   = "── Auto-filled: Planned Today ──";
+        const PLANNED_HEADER = "── Auto-filled: Planned Today ──";
         const COMPLETED_HEADER = "── Auto-filled: Completed Today ──";
 
         // Strip previously auto-filled sections so re-running doesn't duplicate
@@ -618,10 +680,10 @@ const EmployeeDashboard = () => {
           return lines.slice(0, headerIdx).join('\n').trim();
         };
 
-        const manualPlanned   = stripAutoFill(prev.tasks_planned,   PLANNED_HEADER);
-        const manualCompleted = stripAutoFill(prev.tasks_completed,  COMPLETED_HEADER);
+        const manualPlanned = stripAutoFill(prev.tasks_planned, PLANNED_HEADER);
+        const manualCompleted = stripAutoFill(prev.tasks_completed, COMPLETED_HEADER);
 
-        const newPlannedLines   = plannedItems.map(i => i.line);
+        const newPlannedLines = plannedItems.map(i => i.line);
         const newCompletedLines = allCompletedItems.map(i => i.line);
 
         const finalPlanned = (
@@ -638,9 +700,9 @@ const EmployeeDashboard = () => {
 
         return {
           ...prev,
-          tasks_planned:               finalPlanned,
-          tasks_completed:             finalCompleted,
-          auto_filled_planned_tasks:   plannedItems.map(i => i.id),
+          tasks_planned: finalPlanned,
+          tasks_completed: finalCompleted,
+          auto_filled_planned_tasks: plannedItems.map(i => i.id),
           auto_filled_completed_tasks: allCompletedItems.map(i => i.id),
         };
       });
@@ -680,7 +742,7 @@ const EmployeeDashboard = () => {
       {/* Welcome Header */}
       <Box sx={{ mb: 2 }}>
         <h1 className="text-2xl font-extrabold text-slate-900">
-          Good Morning, {profile?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'User'} 👋
+          {getGreeting()}, {profile?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'User'} 👋
         </h1>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mt: 1 }}>
           <Chip
@@ -694,35 +756,36 @@ const EmployeeDashboard = () => {
 
       {/* Stats Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
-        <StatCard 
-          title="Attendance Rate" 
-          value={statsLoading ? '...' : `${monthlyStats?.attendanceRate || 0}%`} 
-          icon={Calendar} 
-          color="#4f46e5" 
-          bgColor="#eef2ff" 
-          trend={monthlyStats?.attendanceRate >= 90 ? "up" : "down"} 
-          trendValue={monthlyStats?.attendanceRate >= 90 ? "+2%" : ""} 
+        <StatCard
+          title="Attendance Rate"
+          value={statsLoading ? '...' : `${monthlyStats?.attendanceRate || 0}%`}
+          icon={Calendar}
+          color="#4f46e5"
+          bgColor="#eef2ff"
+          trend={monthlyStats?.attendanceRate >= 90 ? "up" : "down"}
+          trendValue={monthlyStats?.attendanceRate >= 90 ? "+2%" : ""}
         />
-        <StatCard 
-          title="Avg. Working Hours" 
-          value={statsLoading ? '...' : `${monthlyStats?.avgHours || 0}h`} 
-          icon={Clock} 
-          color="#10b981" 
-          bgColor="#ecfdf5" 
+        <StatCard
+          title="Avg. Working Hours"
+          value={statsLoading ? '...' : `${monthlyStats?.avgHours || 0}h`}
+          icon={Clock}
+          color="#10b981"
+          bgColor="#ecfdf5"
         />
-        <StatCard 
-          title="Reports Submitted" 
-          value={reportsCountLoading ? '...' : `${monthlyReports || 0}`} 
-          icon={FileText} 
-          color="#f59e0b" 
-          bgColor="#fffbeb" 
+        <StatCard
+          title="Reports Submitted"
+          value={reportsCountLoading ? '...' : `${monthlyReports || 0}`}
+          icon={FileText}
+          color="#f59e0b"
+          bgColor="#fffbeb"
+          onClick={() => navigate('/my-attendance')}
         />
-        <StatCard 
-          title="Pending Tasks" 
-          value={tasksLoading ? '...' : `${myTasks.filter(t => t.status === 'pending').length}`} 
-          icon={CheckCircle} 
-          color="#8b5cf6" 
-          bgColor="#f5f3ff" 
+        <StatCard
+          title="Pending Tasks"
+          value={tasksLoading ? '...' : `${myTasks.filter(t => t.status === 'pending').length}`}
+          icon={CheckCircle}
+          color="#8b5cf6"
+          bgColor="#f5f3ff"
           onClick={() => navigate('/my-tasks', { state: { statusFilter: 'pending' } })}
         />
       </div>
@@ -769,7 +832,7 @@ const EmployeeDashboard = () => {
                       size="small"
                       sx={{
                         bgcolor: isCompleted ? '#dbeafe' : isPunchedIn ? (isShiftComplete ? '#dcfce7' : '#ecfdf5') : '#f1f5f9',
-                        color:   isCompleted ? '#1d4ed8' : isPunchedIn ? (isShiftComplete ? '#15803d' : '#10b981') : '#64748b',
+                        color: isCompleted ? '#1d4ed8' : isPunchedIn ? (isShiftComplete ? '#15803d' : '#10b981') : '#64748b',
                         fontWeight: 800, fontSize: 10, height: 24
                       }}
                     />
@@ -823,13 +886,74 @@ const EmployeeDashboard = () => {
                         </span>
                       </div>
                     ) : isPunchedIn ? (
-                      <button
-                        className={`btn-ems w-full h-12 rounded-[14px] ${isShiftComplete ? 'btn-ems-danger shadow-lg shadow-red-100' : 'btn-ems-secondary'}`}
-                        onClick={handlePunchOut}
-                        disabled={actionLoading || (isPunchedIn && !isHalfDayComplete)}
-                      >
-                        <Square size={18} /> {isShiftComplete ? 'Punch Out' : `Punch Out${!isHalfDayComplete ? ' (min 4h)' : ''}`}
-                      </button>
+                      <div className="flex flex-col gap-2">
+                        <button
+                          className={`btn-ems w-full h-12 rounded-[14px] ${(isShiftComplete || earlyExitRequest?.status === 'approved') ? 'btn-ems-danger shadow-lg shadow-red-100' : 'btn-ems-secondary'}`}
+                          onClick={handlePunchOut}
+                          disabled={actionLoading || (isPunchedIn && !isHalfDayComplete && earlyExitRequest?.status !== 'approved')}
+                        >
+                          <Square size={18} /> {(isShiftComplete || earlyExitRequest?.status === 'approved') ? 'Punch Out' : `Punch Out${!isHalfDayComplete ? ' (min 4h)' : ''}`}
+                        </button>
+
+                        {earlyExitRequest?.status === 'rejected' && earlyExitRequest.id !== dismissedRejectionId && (
+                          <div className="w-full rounded-[14px] bg-red-50 text-red-700 font-bold text-sm border border-red-200 overflow-hidden mt-1 animate-in slide-in-from-top-2">
+                            <div className="flex items-start justify-between p-3 border-b border-red-200">
+                              <div className="flex items-center gap-2">
+                                <AlertTriangle size={16} className="text-red-500 flex-shrink-0" />
+                                <span>Early Exit Rejected</span>
+                              </div>
+                              <button onClick={() => setDismissedRejectionId(earlyExitRequest.id)} className="text-red-400 hover:text-red-700 bg-red-100 hover:bg-red-200 rounded p-0.5">
+                                <X size={14} />
+                              </button>
+                            </div>
+                            {earlyExitRequest.reviewer_note && (
+                              <div className="p-3 pt-2 text-xs font-medium text-red-600 bg-white/50">
+                                <span className="uppercase text-[10px] font-black opacity-70 block mb-0.5">HR Note:</span>
+                                {earlyExitRequest.reviewer_note}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {earlyExitRequest?.status === 'approved' && earlyExitRequest.id !== dismissedApprovalId && (
+                          <div className="w-full rounded-[14px] bg-emerald-50 text-emerald-700 font-bold text-sm border border-emerald-200 overflow-hidden mt-1 animate-in slide-in-from-top-2">
+                            <div className="flex items-start justify-between p-3 border-b border-emerald-200">
+                              <div className="flex items-center gap-2">
+                                <CheckCircle size={16} className="text-emerald-500 flex-shrink-0" />
+                                <span>Early Exit Approved!</span>
+                              </div>
+                              <button onClick={() => setDismissedApprovalId(earlyExitRequest.id)} className="text-emerald-400 hover:text-emerald-700 bg-emerald-100 hover:bg-emerald-200 rounded p-0.5">
+                                <X size={14} />
+                              </button>
+                            </div>
+                            <div className="p-3 pt-2 text-xs font-medium text-emerald-600 bg-white/50">
+                              Please click the <b>Punch Out</b> button above when you are ready to leave.
+                              {earlyExitRequest.reviewer_note && (
+                                <div className="mt-1">
+                                  <span className="uppercase text-[10px] font-black opacity-70 block">HR Note:</span>
+                                  "{earlyExitRequest.reviewer_note}"
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {!isShiftComplete && (
+                          earlyExitRequest?.status === 'pending' ? (
+                            <div className="w-full h-12 rounded-[14px] flex items-center justify-center gap-2 bg-amber-50 text-amber-600 font-bold text-sm border border-amber-200 mt-1">
+                              <LogOut size={16} className="animate-pulse" /> Request Pending...
+                            </div>
+                          ) : earlyExitRequest?.status === 'approved' ? null : (
+                            <button
+                              className="btn-ems w-full h-12 rounded-[14px] bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300 mt-1"
+                              onClick={() => setShowEarlyExitModal(true)}
+                              disabled={actionLoading || (earlyExitRequest?.status === 'rejected' && earlyExitRequest.id !== dismissedRejectionId)}
+                            >
+                              <LogOut size={18} /> Request Early Exit
+                            </button>
+                          )
+                        )}
+                      </div>
                     ) : null}
                   </>
                 )}
@@ -838,61 +962,61 @@ const EmployeeDashboard = () => {
 
             {/* Card 1b: Overtime Slot — only visible after punch-out when 8h worked */}
             {showOvertimeCard && (
-            <div className="relative overflow-hidden min-h-[220px]">
-              <div className="card-ems-static h-full p-6 border-l-[6px] border-indigo-500 animate-in fade-in zoom-in duration-500" style={{ borderRadius: '18px' }}>
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest block mb-1">Post-Shift Tracking</span>
-                    <h3 className="text-xl font-extrabold text-slate-900">Overtime Session</h3>
+              <div className="relative overflow-hidden min-h-[220px]">
+                <div className="card-ems-static h-full p-6 border-l-[6px] border-indigo-500 animate-in fade-in zoom-in duration-500" style={{ borderRadius: '18px' }}>
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest block mb-1">Post-Shift Tracking</span>
+                      <h3 className="text-xl font-extrabold text-slate-900">Overtime Session</h3>
+                    </div>
+                    <Chip
+                      label={record.overtime_start_time && !record.overtime_end_time ? "Overtime Active" : "Day Completed"}
+                      size="small"
+                      sx={{
+                        bgcolor: record.overtime_start_time && !record.overtime_end_time ? '#e0e7ff' : '#f1f5f9',
+                        color: record.overtime_start_time && !record.overtime_end_time ? '#4f46e5' : '#64748b',
+                        fontWeight: 800, fontSize: 10, height: 24
+                      }}
+                    />
                   </div>
-                  <Chip
-                    label={record.overtime_start_time && !record.overtime_end_time ? "Overtime Active" : "Day Completed"}
-                    size="small"
-                    sx={{
-                      bgcolor: record.overtime_start_time && !record.overtime_end_time ? '#e0e7ff' : '#f1f5f9',
-                      color: record.overtime_start_time && !record.overtime_end_time ? '#4f46e5' : '#64748b',
-                      fontWeight: 800, fontSize: 10, height: 24
-                    }}
-                  />
-                </div>
 
-                <div className="text-4xl font-black tracking-tighter text-slate-900 mb-6 flex items-baseline gap-2" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                  {formatMs(overtimeElapsedMs)}
-                  {record.overtime_start_time && !record.overtime_end_time && (
-                    <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+                  <div className="text-4xl font-black tracking-tighter text-slate-900 mb-6 flex items-baseline gap-2" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                    {formatMs(overtimeElapsedMs)}
+                    {record.overtime_start_time && !record.overtime_end_time && (
+                      <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+                    )}
+                  </div>
+
+                  {isMobile ? (
+                    <div className="flex flex-col gap-3 p-4 bg-indigo-50/50 rounded-[14px] border border-indigo-100/50 mt-2">
+                      <div className="flex items-center gap-2 text-indigo-600">
+                        <Monitor size={18} />
+                        <span className="text-[11px] font-black uppercase tracking-tight">Desktop Only Feature</span>
+                      </div>
+                      <p className="text-[11px] font-bold text-indigo-800 leading-tight">
+                        Overtime actions are only available on desktop.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      {!record.overtime_start_time ? (
+                        <button className="btn-ems btn-ems-primary w-full h-12 rounded-[14px]" style={{ background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)' }} onClick={handleStartOvertime} disabled={actionLoading}>
+                          <Play size={18} /> Start Overtime
+                        </button>
+                      ) : !record.overtime_end_time ? (
+                        <button className="btn-ems btn-ems-danger w-full h-12 rounded-[14px]" onClick={handleEndOvertime} disabled={actionLoading}>
+                          <Square size={18} /> End Overtime
+                        </button>
+                      ) : (
+                        <div className="flex items-center justify-center gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                          <CheckCircle size={18} className="text-emerald-500" />
+                          <span className="text-sm font-bold text-slate-700">Total OT: {formatMs(record.overtime_duration_ms)}</span>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
-
-                {isMobile ? (
-                  <div className="flex flex-col gap-3 p-4 bg-indigo-50/50 rounded-[14px] border border-indigo-100/50 mt-2">
-                    <div className="flex items-center gap-2 text-indigo-600">
-                      <Monitor size={18} />
-                      <span className="text-[11px] font-black uppercase tracking-tight">Desktop Only Feature</span>
-                    </div>
-                    <p className="text-[11px] font-bold text-indigo-800 leading-tight">
-                      Overtime actions are only available on desktop.
-                    </p>
-                  </div>
-                ) : (
-                  <>
-                    {!record.overtime_start_time ? (
-                      <button className="btn-ems btn-ems-primary w-full h-12 rounded-[14px]" style={{ background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)' }} onClick={handleStartOvertime} disabled={actionLoading}>
-                        <Play size={18} /> Start Overtime
-                      </button>
-                    ) : !record.overtime_end_time ? (
-                      <button className="btn-ems btn-ems-danger w-full h-12 rounded-[14px]" onClick={handleEndOvertime} disabled={actionLoading}>
-                        <Square size={18} /> End Overtime
-                      </button>
-                    ) : (
-                      <div className="flex items-center justify-center gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100">
-                        <CheckCircle size={18} className="text-emerald-500" />
-                        <span className="text-sm font-bold text-slate-700">Total OT: {formatMs(record.overtime_duration_ms)}</span>
-                      </div>
-                    )}
-                  </>
-                )}
               </div>
-            </div>
             )}
 
             {/* Card 2: Lunch Break (Visible anytime during active shift until completed) */}
@@ -1101,51 +1225,6 @@ const EmployeeDashboard = () => {
             )}
           </Box>
 
-          {/* ── Recent Activity ── */}
-          <Box className="card-ems-static" sx={{ overflow: 'hidden' }}>
-            <Box sx={{ p: 3, pb: 0 }}>
-              <h3 className="text-base font-bold text-slate-900 mb-4">Recent Activity</h3>
-            </Box>
-            <div className="table-responsive">
-              <table className="table-ems">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Duration</th>
-                    <th>Status</th>
-                    <th style={{ textAlign: 'right' }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading ? (
-                    <tr><td colSpan="4" className="text-center p-4 text-slate-400">Loading history...</td></tr>
-                  ) : history.length === 0 ? (
-                    <tr><td colSpan="4" className="text-center p-4 text-slate-400">No activity found</td></tr>
-                  ) : history.map((log, i) => (
-                    <tr key={log.id || i}>
-                      <td className="text-sm font-medium">
-                        {/* attendance_date is YYYY-MM-DD — append T00:00 to parse as local */}
-                        {new Date(`${log.attendance_date}T00:00`).toLocaleDateString([], { day: 'numeric', month: 'short' })}
-                      </td>
-                      <td className="text-sm font-bold">
-                        {log.total_hours ? `${log.total_hours}h` : log.status === 'punched_in' ? 'Ongoing' : '--'}
-                      </td>
-                      <td>
-                        <span className={`status-dot ${log.status === 'punched_in' ? 'online' : 'offline'}`}>
-                          {log.status.replace(/_/g, ' ')}
-                        </span>
-                      </td>
-                      <td style={{ textAlign: 'right' }}>
-                        <button className="btn-icon-ems" style={{ width: 30, height: 30 }} aria-label="View details">
-                          <ChevronRight size={14} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Box>
         </div>
 
         {/* Right Column */}
@@ -1209,6 +1288,57 @@ const EmployeeDashboard = () => {
               ))}
             </div>
           </Box>
+
+          {/* ── Recent Activity ── */}
+          <Box className="card-ems-static" sx={{ overflow: 'hidden' }}>
+            <Box sx={{ p: 3, pb: 0 }}>
+              <h3 className="text-base font-bold text-slate-900 mb-4">Recent Activity</h3>
+            </Box>
+            <div className="table-responsive">
+              <table className="table-ems">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Duration</th>
+                    <th>Status</th>
+                    <th style={{ textAlign: 'right' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr><td colSpan="4" className="text-center p-4 text-slate-400">Loading history...</td></tr>
+                  ) : history.length === 0 ? (
+                    <tr><td colSpan="4" className="text-center p-4 text-slate-400">No activity found</td></tr>
+                  ) : history.map((log, i) => (
+                    <tr key={log.id || i}>
+                      <td className="text-sm font-medium">
+                        {/* attendance_date is YYYY-MM-DD — append T00:00 to parse as local */}
+                        {new Date(`${log.attendance_date}T00:00`).toLocaleDateString([], { day: 'numeric', month: 'short' })}
+                      </td>
+                      <td className="text-sm font-bold">
+                        {log.total_hours ? `${log.total_hours}h` : log.status === 'punched_in' ? 'Ongoing' : '--'}
+                      </td>
+                      <td>
+                        <span className={`status-dot ${log.status === 'punched_in' ? 'online' : 'offline'}`}>
+                          {log.status.replace(/_/g, ' ')}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button
+                          className="btn-icon-ems"
+                          style={{ width: 30, height: 30 }}
+                          aria-label="View details"
+                          onClick={() => navigate('/my-attendance')}
+                        >
+                          <ChevronRight size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Box>
         </div>
       </div>
 
@@ -1247,6 +1377,81 @@ const EmployeeDashboard = () => {
             </Button>
           </div>
         </Box>
+      </Modal>
+
+      {/* --- Early Exit Request Modal --- */}
+      <Modal open={showEarlyExitModal} onClose={() => setShowEarlyExitModal(false)}>
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md">
+          <div className="bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100">
+            {/* Header */}
+            <div className="bg-amber-500 p-6 flex items-start justify-between">
+              <div>
+                <h3 className="text-xl font-black text-white flex items-center gap-2">
+                  <LogOut size={20} />
+                  Request Early Exit
+                </h3>
+                <p className="text-amber-100 text-sm mt-1">Submit a request to leave before shift completion</p>
+              </div>
+              <button
+                onClick={() => setShowEarlyExitModal(false)}
+                className="text-white/80 hover:text-white bg-white/10 hover:bg-white/20 p-2 rounded-full transition-all"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 space-y-5">
+              <div className="flex bg-amber-50 rounded-2xl p-4 gap-4 items-center">
+                <AlertTriangle size={24} className="text-amber-500 flex-shrink-0" />
+                <p className="text-xs font-semibold text-amber-800 leading-relaxed">
+                  Your request will be sent to HR/Admin for approval. If approved, you will be automatically punched out.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-700 uppercase tracking-wider mb-2">Reason</label>
+                <select
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-700 rounded-xl px-4 py-3 text-sm font-semibold focus:ring-4 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition-all"
+                  value={earlyExitForm.reason}
+                  onChange={(e) => setEarlyExitForm({ ...earlyExitForm, reason: e.target.value })}
+                >
+                  <option value="">Select a reason...</option>
+                  {FORCE_PUNCH_OUT_REASONS.map(r => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-700 uppercase tracking-wider mb-2">Note / Details</label>
+                <textarea
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-700 rounded-xl px-4 py-3 text-sm font-semibold focus:ring-4 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition-all resize-none h-24"
+                  placeholder="Provide brief details..."
+                  value={earlyExitForm.note}
+                  onChange={(e) => setEarlyExitForm({ ...earlyExitForm, note: e.target.value })}
+                />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-6 pt-0 flex gap-3">
+              <button
+                className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 rounded-xl text-sm font-black uppercase tracking-wider hover:bg-slate-200 transition-all"
+                onClick={() => setShowEarlyExitModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="flex-1 px-4 py-3 bg-amber-500 text-white rounded-xl text-sm font-black uppercase tracking-wider hover:bg-amber-600 transition-all shadow-lg shadow-amber-200 disabled:opacity-50"
+                onClick={handleSubmitEarlyExitRequest}
+                disabled={actionLoading}
+              >
+                {actionLoading ? 'Submitting...' : 'Submit Request'}
+              </button>
+            </div>
+          </div>
+        </div>
       </Modal>
 
     </div>

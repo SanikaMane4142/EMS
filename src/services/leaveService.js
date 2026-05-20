@@ -380,7 +380,8 @@ export const leaveService = {
    */
   async uploadMedicalCert(file, userId) {
     const fileExt = file.name.split('.').pop();
-    const fileName = `${userId}_${Date.now()}.${fileExt}`;
+    // Nest under user ID directory for folder-based RLS policies
+    const fileName = `${userId}/${Date.now()}.${fileExt}`;
     const filePath = `${fileName}`;
 
     const { error: uploadError } = await supabase.storage
@@ -394,6 +395,71 @@ export const leaveService = {
       .getPublicUrl(filePath);
 
     return publicUrl;
+  },
+
+  /**
+   * Upload and submit medical certificate for an existing leave request
+   */
+  async submitMedicalCert(requestId, file, userId) {
+    const medicalUrl = await this.uploadMedicalCert(file, userId);
+
+    const { data, error } = await supabase
+      .from('leave_requests')
+      .update({
+        medical_doc_url: medicalUrl,
+        medical_doc_status: 'medical_doc_submitted',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', requestId)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    // Log action to leave_action_logs
+    try {
+      await supabase.from('leave_action_logs').insert({
+        leave_request_id: requestId,
+        actor_id: userId,
+        action_type: 'document_upload',
+        new_state: { medical_doc_url: medicalUrl, medical_doc_status: 'medical_doc_submitted' },
+        reason: 'Employee uploaded medical certificate.'
+      });
+    } catch (logErr) {
+      console.warn('Failed to audit log medical upload:', logErr.message);
+    }
+
+    return data;
+  },
+
+  /**
+   * [HR ONLY] Verify or reject a medical document
+   */
+  async verifyMedicalDoc(requestId, status, reason = '', grantExtension = false) {
+    const { data, error } = await supabase
+      .rpc('verify_medical_document', {
+        p_leave_id: requestId,
+        p_status: status,
+        p_reason: reason || null,
+        p_grant_extension: grantExtension
+      });
+
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * [HR ONLY] Override auto-conversion and approve document
+   */
+  async overrideConversion(requestId, note) {
+    const { data, error } = await supabase
+      .rpc('admin_override_conversion', {
+        p_leave_id: requestId,
+        p_note: note
+      });
+
+    if (error) throw error;
+    return data;
   }
 };
 

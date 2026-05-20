@@ -1,17 +1,23 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Box, Avatar } from '@mui/material';
+import { Box, Avatar, Modal, Tooltip } from '@mui/material';
 import {
   UserCheck, UserX, Clock, Download, Calendar, Search,
   MapPin, Plane, ArrowUpRight, Check, X,
-  TrendingUp, RefreshCw, ChevronLeft, ChevronRight
+  TrendingUp, RefreshCw, ChevronLeft, ChevronRight,
+  LogOut, AlertTriangle, Info, FileText, Shield
 } from 'lucide-react';
 import { utils, writeFile, write } from 'xlsx';
 import PageHeader from '../components/PageHeader';
-import { useAttendanceOverview, usePendingAbsenceExplanations, useReviewAbsenceExplanation } from '../hooks/useAttendance';
+import {
+  useAttendanceOverview, usePendingAbsenceExplanations, useReviewAbsenceExplanation,
+  useAuthorizedEarlyPunchOut, useOverrideLogs,
+  usePendingEarlyExitRequests, useReviewEarlyExitRequest
+} from '../hooks/useAttendance';
 import { useDepartments } from '../hooks/useDepartments';
 import { useEmployees } from '../hooks/useEmployees';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-hot-toast';
+import Swal from 'sweetalert2';
 
 // --- Timer Helpers ---
 const formatMs = (ms) => {
@@ -62,7 +68,23 @@ const STATUS_CONFIG = {
   'Absent Explained': { color: '#eab308', bg: '#fef9c3', label: 'Absent Explained', icon: Clock },
   'On Leave': { color: '#8b5cf6', bg: '#f5f3ff', label: 'On Leave', icon: Plane },
   'Remote': { color: '#3b82f6', bg: '#eff6ff', label: 'Remote', icon: MapPin },
+  'Early Exit Approved': { color: '#10b981', bg: '#ecfdf5', label: 'Early Exit Approved', icon: Shield },
+  'Early Exit': { color: '#f59e0b', bg: '#fffbeb', label: 'Early Exit', icon: LogOut },
+  'Left': { color: '#64748b', bg: '#f1f5f9', label: 'Left', icon: LogOut },
 };
+
+const FORCE_PUNCH_OUT_REASONS = [
+  'Work completed for today',
+  'Medical emergency',
+  'Personal emergency',
+  'Client meeting / offsite work',
+  'Approved flexible timing',
+  'Internet/electricity issue',
+  'System issue',
+  'Shift adjustment',
+  'Travel approval',
+  'Other',
+];
 
 const Attendance = () => {
   const { profile } = useAuth();
@@ -94,6 +116,79 @@ const Attendance = () => {
   const { data: departments = [] } = useDepartments();
   const { data: pendingExplanations = [] } = usePendingAbsenceExplanations({ startDate, endDate });
   const reviewExplanationMutation = useReviewAbsenceExplanation();
+  const earlyPunchOutMutation = useAuthorizedEarlyPunchOut();
+  const { data: pendingEarlyExits = [] } = usePendingEarlyExitRequests();
+  const reviewEarlyExitMutation = useReviewEarlyExitRequest();
+
+  // Role check for HR/Admin
+  const isAdminRole = profile?.role === 'hr' || profile?.role === 'admin' || profile?.role === 'super_admin';
+
+  // Authorized Punch-Out Modal State
+  const [punchOutModal, setPunchOutModal] = useState({ open: false, row: null });
+  const [punchOutForm, setPunchOutForm] = useState({ reason: '', note: '', markFullDay: false });
+
+  // Override Detail Modal State
+  const [detailModal, setDetailModal] = useState({ open: false, row: null });
+
+  // Early Exit Request Review Modal State
+  const [reviewEarlyExitModal, setReviewEarlyExitModal] = useState({ open: false, request: null });
+  const [reviewEarlyExitForm, setReviewEarlyExitForm] = useState({ note: '', markFullDay: false });
+
+  const handleOpenPunchOutModal = (row) => {
+    setPunchOutForm({ reason: '', note: '', markFullDay: false });
+    setPunchOutModal({ open: true, row });
+  };
+
+  const handleSubmitEarlyPunchOut = async () => {
+    if (!punchOutForm.reason) { toast.error('Please select a reason.'); return; }
+    if (!punchOutForm.note.trim()) { toast.error('Please enter a note.'); return; }
+
+    const result = await Swal.fire({
+      title: 'Confirm Early Punch-Out',
+      html: `<p style="font-size:14px;color:#475569;">You are about to punch out <b>${punchOutModal.row?.name}</b> early. Exact punch-out time will be saved. ${punchOutForm.markFullDay ? '<br/><b>Full-day (8h) approval</b> will affect payable hours.' : 'Payable hours will match actual worked hours.'}</p>`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#4f46e5',
+      cancelButtonColor: '#94a3b8',
+      confirmButtonText: 'Yes, Punch Out',
+      cancelButtonText: 'Cancel',
+    });
+
+    if (!result.isConfirmed) return;
+
+    try {
+      await earlyPunchOutMutation.mutateAsync({
+        attendanceId: punchOutModal.row.id,
+        reason: punchOutForm.reason,
+        note: punchOutForm.note.trim(),
+        markFullDay: punchOutForm.markFullDay,
+      });
+      toast.success(`${punchOutModal.row.name} has been punched out.`);
+      setPunchOutModal({ open: false, row: null });
+    } catch (err) {
+      toast.error(err.message || 'Failed to punch out employee.');
+    }
+  };
+
+  const handleReviewEarlyExit = async (status) => {
+    if (status === 'rejected' && !reviewEarlyExitForm.note.trim()) {
+      toast.error('Please provide a reason for rejection.');
+      return;
+    }
+
+    try {
+      await reviewEarlyExitMutation.mutateAsync({
+        requestId: reviewEarlyExitModal.request.id,
+        status,
+        reviewerNote: reviewEarlyExitForm.note.trim(),
+        markFullDay: reviewEarlyExitForm.markFullDay
+      });
+      toast.success(`Request ${status} successfully.`);
+      setReviewEarlyExitModal({ open: false, request: null });
+    } catch (err) {
+      toast.error(err.message || 'Failed to review request.');
+    }
+  };
   const pendingExplanationByAttendanceId = useMemo(
     () => Object.fromEntries((pendingExplanations || []).map((p) => [p.attendance_id, p])),
     [pendingExplanations]
@@ -145,7 +240,7 @@ const Attendance = () => {
     };
   }, [rawAttendance, attendance]);
 
-  const hasPendingActions = useMemo(() => 
+  const hasPendingActions = useMemo(() =>
     attendance.some(row => (row.absenceExplanation?.status === 'pending' || pendingExplanationByAttendanceId[row.id]?.status === 'pending')),
     [attendance, pendingExplanationByAttendanceId]
   );
@@ -297,10 +392,41 @@ const Attendance = () => {
         </div>
       )}
 
+      {pendingEarlyExits.length > 0 && (
+        <div className="bg-orange-50 border border-orange-100 rounded-2xl p-4 mb-6">
+          <div className="text-xs font-black text-orange-700 uppercase tracking-wider mb-3">
+            Pending Early Exit Requests ({pendingEarlyExits.length})
+          </div>
+          <div className="flex flex-col gap-2">
+            {pendingEarlyExits.slice(0, 8).map((req) => (
+              <div key={req.id} className="bg-white border border-orange-100 rounded-xl p-3 flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-sm font-bold text-slate-900">
+                    {req.employee?.full_name || req.employee?.email || 'Employee'} ({req.employee?.employee_id || '-'})
+                  </div>
+                  <div className="text-xs text-slate-500 font-medium">
+                    <strong className="text-slate-700">Reason:</strong> {req.reason} — <span className="italic">{req.note}</span>
+                  </div>
+                </div>
+                <button
+                  className="btn-ems btn-ems-primary text-xs h-8 px-4 py-0"
+                  onClick={() => {
+                    setReviewEarlyExitForm({ note: '', markFullDay: false });
+                    setReviewEarlyExitModal({ open: true, request: req });
+                  }}
+                >
+                  Review Request
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Premium Advanced Filter Bar */}
       <div className="bg-white/70 backdrop-blur-2xl sticky top-4 z-30 p-2.5 rounded-[32px] border border-white/40 shadow-[0_8px_32px_rgba(0,0,0,0.06)] mb-8 mx-auto max-w-[1400px]">
         <div className="flex flex-col xl:flex-row gap-4 items-center">
-          
+
           {/* Search Section */}
           <div className="relative group flex-1 w-full xl:w-auto">
             <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -319,18 +445,17 @@ const Attendance = () => {
 
           {/* Controls Section */}
           <div className="flex flex-wrap items-center justify-center gap-4 w-full xl:w-auto">
-            
+
             {/* Status Pills */}
             <div className="flex items-center gap-1 p-1 bg-slate-100/50 rounded-[22px] border border-slate-200/20">
               {['all', 'Present', 'Late', 'Absent', 'Reason Pending', 'On Leave'].map(status => (
                 <button
                   key={status}
                   onClick={() => setStatusFilter(status)}
-                  className={`px-4 py-2.5 rounded-[18px] text-[10px] font-black uppercase tracking-wider transition-all duration-300 ${
-                    statusFilter === status
+                  className={`px-4 py-2.5 rounded-[18px] text-[10px] font-black uppercase tracking-wider transition-all duration-300 ${statusFilter === status
                       ? 'bg-white text-indigo-600 shadow-[0_4px_12px_rgba(79,70,229,0.12)] border border-indigo-50'
                       : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'
-                  }`}
+                    }`}
                 >
                   {status === 'all' ? 'All Logs' : status}
                 </button>
@@ -358,20 +483,20 @@ const Attendance = () => {
             <div className="flex items-center gap-3 px-4 py-2 bg-indigo-50/50 border border-indigo-100/50 rounded-[22px]">
               <div className="flex items-center gap-2">
                 <Calendar size={14} className="text-indigo-400" />
-                <input 
-                  type="date" 
-                  className="bg-transparent border-none text-[10px] font-black text-indigo-600 outline-none cursor-pointer" 
-                  value={startDate} 
-                  onChange={e => setStartDate(e.target.value)} 
+                <input
+                  type="date"
+                  className="bg-transparent border-none text-[10px] font-black text-indigo-600 outline-none cursor-pointer"
+                  value={startDate}
+                  onChange={e => setStartDate(e.target.value)}
                 />
               </div>
               <div className="w-4 h-[1px] bg-indigo-200" />
               <div className="flex items-center gap-2">
-                <input 
-                  type="date" 
-                  className="bg-transparent border-none text-[10px] font-black text-indigo-600 outline-none cursor-pointer" 
-                  value={endDate} 
-                  onChange={e => setEndDate(e.target.value)} 
+                <input
+                  type="date"
+                  className="bg-transparent border-none text-[10px] font-black text-indigo-600 outline-none cursor-pointer"
+                  value={endDate}
+                  onChange={e => setEndDate(e.target.value)}
                 />
               </div>
             </div>
@@ -393,7 +518,7 @@ const Attendance = () => {
                 <th className="px-6 py-5 text-center text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Lunch</th>
                 <th className="px-6 py-5 text-center text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Overtime</th>
                 <th className="px-6 py-5 text-center text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Status</th>
-                {hasPendingActions && <th className="px-8 py-5 text-center text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Action</th>}
+                {(hasPendingActions || isAdminRole) && <th className="px-8 py-5 text-center text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Action</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -401,7 +526,7 @@ const Attendance = () => {
                 // Skeleton loading rows
                 [...Array(5)].map((_, i) => (
                   <tr key={i} className="animate-pulse">
-                    <td colSpan={hasPendingActions ? 8 : 7} className="px-8 py-10">
+                    <td colSpan={(hasPendingActions || isAdminRole) ? 8 : 7} className="px-8 py-10">
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 bg-slate-100 rounded-2xl" />
                         <div className="space-y-2">
@@ -504,51 +629,110 @@ const Attendance = () => {
                     {/* Status Pill */}
                     <td className="px-6 py-5">
                       <div className="flex justify-center">
-                        <div
-                          className="px-5 py-2.5 rounded-[20px] flex items-center gap-2.5 border shadow-[0_4px_12px_rgba(0,0,0,0.03)] transition-all group-hover:scale-105 group-hover:shadow-md"
-                          style={{
-                            backgroundColor: STATUS_CONFIG[row.displayStatus]?.bg || '#f1f5f9',
-                            borderColor: `${STATUS_CONFIG[row.displayStatus]?.color}20`,
-                            color: STATUS_CONFIG[row.displayStatus]?.color || '#64748b'
-                          }}
-                        >
-                          {(() => {
-                            const Icon = STATUS_CONFIG[row.displayStatus]?.icon;
-                            return Icon ? <Icon size={14} strokeWidth={3} /> : null;
-                          })()}
-                          <span className="text-[10px] font-black uppercase tracking-[0.15em]">
-                            {row.displayStatus}
-                          </span>
-                        </div>
+                        {row.is_force_punched_out ? (
+                          <Tooltip
+                            arrow
+                            placement="top"
+                            title={
+                              <div className="p-2 text-xs space-y-1">
+                                <p className="font-bold border-b border-white/20 pb-1 mb-1">Early Exit Details</p>
+                                <p>Actual: <b>{row.actual_work_hours ?? '-'}h</b></p>
+                                <p>Payable: <b>{row.approved_work_hours ?? '-'}h</b></p>
+                                <p>Reason: {row.force_punch_out_reason}</p>
+                                <p>Note: {row.force_punch_out_note}</p>
+                                {row.force_punch_out_at && <p>At: {new Date(row.force_punch_out_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>}
+                              </div>
+                            }
+                          >
+                            <div
+                              className="px-5 py-2.5 rounded-[20px] flex items-center gap-2.5 border shadow-[0_4px_12px_rgba(0,0,0,0.03)] cursor-pointer transition-all group-hover:scale-105 group-hover:shadow-md"
+                              style={{
+                                backgroundColor: STATUS_CONFIG[row.displayStatus]?.bg || '#f1f5f9',
+                                borderColor: `${STATUS_CONFIG[row.displayStatus]?.color}20`,
+                                color: STATUS_CONFIG[row.displayStatus]?.color || '#64748b'
+                              }}
+                              onClick={() => setDetailModal({ open: true, row })}
+                            >
+                              {(() => {
+                                const Icon = STATUS_CONFIG[row.displayStatus]?.icon;
+                                return Icon ? <Icon size={14} strokeWidth={3} /> : null;
+                              })()}
+                              <span className="text-[10px] font-black uppercase tracking-[0.15em]">
+                                {row.displayStatus}
+                              </span>
+                            </div>
+                          </Tooltip>
+                        ) : (
+                          <div
+                            className="px-5 py-2.5 rounded-[20px] flex items-center gap-2.5 border shadow-[0_4px_12px_rgba(0,0,0,0.03)] transition-all group-hover:scale-105 group-hover:shadow-md"
+                            style={{
+                              backgroundColor: STATUS_CONFIG[row.displayStatus]?.bg || '#f1f5f9',
+                              borderColor: `${STATUS_CONFIG[row.displayStatus]?.color}20`,
+                              color: STATUS_CONFIG[row.displayStatus]?.color || '#64748b'
+                            }}
+                          >
+                            {(() => {
+                              const Icon = STATUS_CONFIG[row.displayStatus]?.icon;
+                              return Icon ? <Icon size={14} strokeWidth={3} /> : null;
+                            })()}
+                            <span className="text-[10px] font-black uppercase tracking-[0.15em]">
+                              {row.displayStatus}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </td>
 
                     {/* Row Action */}
-                    {hasPendingActions && (
+                    {(hasPendingActions || isAdminRole) && (
                       <td className="px-8 py-5 text-center">
-                        {(row.absenceExplanation?.status === 'pending' || pendingExplanationByAttendanceId[row.id]?.status === 'pending') ? (
-                          <button
-                            className="group/btn relative px-6 py-2.5 bg-emerald-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-wider hover:bg-emerald-600 transition-all hover:shadow-lg hover:shadow-emerald-200 active:scale-95 disabled:opacity-50"
-                            disabled={reviewExplanationMutation.isPending}
-                            onClick={() => handleReviewReason((row.absenceExplanation?.id || pendingExplanationByAttendanceId[row.id]?.id), 'approved')}
-                          >
-                            <span className="flex items-center gap-2">
-                              <Check size={14} strokeWidth={3} />
-                              Review
-                            </span>
-                          </button>
-                        ) : (
-                          <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center mx-auto text-slate-300">
-                             <Check size={14} />
-                          </div>
-                        )}
+                        <div className="flex items-center justify-center gap-2">
+                          {/* Absence review button */}
+                          {(row.absenceExplanation?.status === 'pending' || pendingExplanationByAttendanceId[row.id]?.status === 'pending') && (
+                            <button
+                              className="px-4 py-2 bg-emerald-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-wider hover:bg-emerald-600 transition-all hover:shadow-lg active:scale-95 disabled:opacity-50"
+                              disabled={reviewExplanationMutation.isPending}
+                              onClick={() => handleReviewReason((row.absenceExplanation?.id || pendingExplanationByAttendanceId[row.id]?.id), 'approved')}
+                            >
+                              <span className="flex items-center gap-1.5">
+                                <Check size={12} strokeWidth={3} />
+                                Review
+                              </span>
+                            </button>
+                          )}
+                          {/* Authorized Punch-Out button — only for active employees */}
+                          {isAdminRole && row.rawStatus === 'punched_in' && !row.punch_out_time && !row.is_force_punched_out && (
+                            <button
+                              className="px-4 py-2 bg-amber-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-wider hover:bg-amber-600 transition-all hover:shadow-lg hover:shadow-amber-200 active:scale-95 disabled:opacity-50"
+                              disabled={earlyPunchOutMutation.isPending}
+                              onClick={() => handleOpenPunchOutModal(row)}
+                            >
+                              <span className="flex items-center gap-1.5">
+                                <LogOut size={12} strokeWidth={3} />
+                                Early Exit
+                              </span>
+                            </button>
+                          )}
+                          {/* Detail view for force-punched-out records */}
+                          {isAdminRole && row.is_force_punched_out && (
+                            <button
+                              className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-2xl text-[10px] font-black uppercase tracking-wider hover:bg-indigo-100 transition-all active:scale-95"
+                              onClick={() => setDetailModal({ open: true, row })}
+                            >
+                              <span className="flex items-center gap-1.5">
+                                <Info size={12} strokeWidth={3} />
+                                Details
+                              </span>
+                            </button>
+                          )}
+                        </div>
                       </td>
                     )}
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={hasPendingActions ? 8 : 7} className="px-8 py-20 text-center">
+                  <td colSpan={(hasPendingActions || isAdminRole) ? 8 : 7} className="px-8 py-20 text-center">
                     <div className="flex flex-col items-center">
                       <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-4">
                         <Search size={32} className="text-slate-200" />
@@ -588,6 +772,224 @@ const Attendance = () => {
           </div>
         </div>
       </div>
+
+      {/* --- Authorized Punch-Out Modal --- */}
+      <Modal open={punchOutModal.open} onClose={() => setPunchOutModal({ open: false, row: null })}>
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md">
+          <div className="bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100">
+            {/* Header */}
+            <div className="bg-amber-500 p-6 flex items-start justify-between">
+              <div>
+                <h3 className="text-xl font-black text-white flex items-center gap-2">
+                  <LogOut size={20} />
+                  Authorized Early Exit
+                </h3>
+                <p className="text-amber-100 text-sm mt-1">Force punch-out for {punchOutModal.row?.name}</p>
+              </div>
+              <button
+                onClick={() => setPunchOutModal({ open: false, row: null })}
+                className="text-white/80 hover:text-white bg-white/10 hover:bg-white/20 p-2 rounded-full transition-all"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 space-y-5">
+              <div className="flex bg-amber-50 rounded-2xl p-4 gap-4 items-center">
+                <AlertTriangle size={24} className="text-amber-500 flex-shrink-0" />
+                <p className="text-xs font-semibold text-amber-800 leading-relaxed">
+                  This action forces the employee to punch out immediately. This should only be used for approved early departures or system issues.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-700 uppercase tracking-wider mb-2">Reason</label>
+                <select
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-700 rounded-xl px-4 py-3 text-sm font-semibold focus:ring-4 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition-all"
+                  value={punchOutForm.reason}
+                  onChange={(e) => setPunchOutForm({ ...punchOutForm, reason: e.target.value })}
+                >
+                  <option value="">Select a reason...</option>
+                  {FORCE_PUNCH_OUT_REASONS.map(r => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-700 uppercase tracking-wider mb-2">Note / Details</label>
+                <textarea
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-700 rounded-xl px-4 py-3 text-sm font-semibold focus:ring-4 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition-all resize-none h-24"
+                  placeholder="Provide brief details..."
+                  value={punchOutForm.note}
+                  onChange={(e) => setPunchOutForm({ ...punchOutForm, note: e.target.value })}
+                />
+              </div>
+
+              <div className="flex items-center gap-3 p-4 bg-slate-50 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => setPunchOutForm({ ...punchOutForm, markFullDay: !punchOutForm.markFullDay })}>
+                <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-colors ${punchOutForm.markFullDay ? 'bg-indigo-500 border-indigo-500' : 'border-slate-300 bg-white'}`}>
+                  {punchOutForm.markFullDay && <Check size={14} className="text-white" strokeWidth={3} />}
+                </div>
+                <div>
+                  <div className="text-sm font-bold text-slate-900">Mark as 8-hours completed (Full Day)</div>
+                  <div className="text-xs font-medium text-slate-500">Employee will be paid for a full day despite leaving early.</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-6 pt-0 flex gap-3">
+              <button
+                className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 rounded-xl text-sm font-black uppercase tracking-wider hover:bg-slate-200 transition-all"
+                onClick={() => setPunchOutModal({ open: false, row: null })}
+              >
+                Cancel
+              </button>
+              <button
+                className="flex-1 px-4 py-3 bg-amber-500 text-white rounded-xl text-sm font-black uppercase tracking-wider hover:bg-amber-600 transition-all shadow-lg shadow-amber-200 disabled:opacity-50"
+                onClick={handleSubmitEarlyPunchOut}
+                disabled={earlyPunchOutMutation.isPending}
+              >
+                {earlyPunchOutMutation.isPending ? 'Processing...' : 'Confirm Exit'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* --- Override Detail Modal --- */}
+      <Modal open={detailModal.open} onClose={() => setDetailModal({ open: false, row: null })}>
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md">
+          <div className="bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100">
+            {/* Header */}
+            <div className="bg-slate-900 p-6 flex items-start justify-between">
+              <div>
+                <h3 className="text-xl font-black text-white flex items-center gap-2">
+                  <Shield size={20} className={detailModal.row?.approved_full_day ? "text-emerald-400" : "text-amber-400"} />
+                  Early Exit Details
+                </h3>
+                <p className="text-slate-400 text-sm mt-1">{detailModal.row?.name}</p>
+              </div>
+              <button
+                onClick={() => setDetailModal({ open: false, row: null })}
+                className="text-white/50 hover:text-white bg-white/10 hover:bg-white/20 p-2 rounded-full transition-all"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Actual Worked</p>
+                  <p className="text-xl font-black text-slate-900">{detailModal.row?.actual_work_hours ?? '-'} <span className="text-sm font-bold text-slate-400">hrs</span></p>
+                </div>
+                <div className={`p-4 rounded-2xl border ${detailModal.row?.approved_full_day ? 'bg-emerald-50 border-emerald-100' : 'bg-slate-50 border-slate-100'}`}>
+                  <p className={`text-[10px] font-black uppercase tracking-wider mb-1 ${detailModal.row?.approved_full_day ? 'text-emerald-600' : 'text-slate-400'}`}>Payable / Approved</p>
+                  <p className={`text-xl font-black ${detailModal.row?.approved_full_day ? 'text-emerald-700' : 'text-slate-900'}`}>{detailModal.row?.approved_work_hours ?? '-'} <span className="text-sm font-bold opacity-50">hrs</span></p>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2">Override Reason</p>
+                <div className="flex items-start gap-3 bg-slate-50 rounded-xl p-4 border border-slate-100">
+                  <FileText size={16} className="text-slate-400 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-bold text-slate-900">{detailModal.row?.force_punch_out_reason}</p>
+                    {detailModal.row?.force_punch_out_note && (
+                      <p className="text-sm text-slate-600 mt-1">{detailModal.row.force_punch_out_note}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 font-medium">
+              <span>Action at: {detailModal.row?.force_punch_out_at ? new Date(detailModal.row.force_punch_out_at).toLocaleString() : '-'}</span>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Early Exit Request Review Modal */}
+      <Modal open={reviewEarlyExitModal.open} onClose={() => setReviewEarlyExitModal({ open: false, request: null })}>
+        <Box sx={{
+          position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+          width: 500, bgcolor: 'background.paper', borderRadius: 4, boxShadow: 24, p: 0, overflow: 'hidden'
+        }}>
+          <div className="bg-orange-500 p-5 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-white">
+              <LogOut size={20} />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-white">Review Early Exit</h3>
+              <p className="text-sm text-orange-100 font-medium">{reviewEarlyExitModal.request?.employee?.full_name}</p>
+            </div>
+          </div>
+          <div className="p-6">
+            <div className="mb-4 bg-orange-50 p-4 rounded-xl border border-orange-100">
+              <div className="mb-2">
+                <span className="text-[10px] uppercase font-bold text-orange-600 block mb-1">Reason</span>
+                <span className="text-sm font-semibold text-slate-900">{reviewEarlyExitModal.request?.reason}</span>
+              </div>
+              <div>
+                <span className="text-[10px] uppercase font-bold text-orange-600 block mb-1">Employee Note</span>
+                <span className="text-sm text-slate-700">{reviewEarlyExitModal.request?.note || 'No additional note'}</span>
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <label className="text-xs font-bold text-slate-700 uppercase block mb-2">Reviewer Note (Required for Reject)</label>
+              <textarea
+                className="w-full border border-slate-200 rounded-xl p-3 text-sm focus:border-orange-500 focus:ring-1 focus:ring-orange-500 outline-none resize-none h-20"
+                placeholder="Add your note..."
+                value={reviewEarlyExitForm.note}
+                onChange={e => setReviewEarlyExitForm(prev => ({ ...prev, note: e.target.value }))}
+              />
+            </div>
+
+            <label className="flex items-center gap-2 cursor-pointer mb-6 p-3 rounded-xl border border-slate-200 hover:bg-slate-50 transition-colors">
+              <input
+                type="checkbox"
+                className="w-5 h-5 rounded border-slate-300 text-orange-500 focus:ring-orange-500"
+                checked={reviewEarlyExitForm.markFullDay}
+                onChange={e => setReviewEarlyExitForm(prev => ({ ...prev, markFullDay: e.target.checked }))}
+              />
+              <div>
+                <span className="text-sm font-bold text-slate-800 block">Mark as Full Day</span>
+                <span className="text-xs font-medium text-slate-500">Employee gets 8h credit (Approved leave early)</span>
+              </div>
+            </label>
+
+            <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
+              <button
+                className="px-5 py-2.5 rounded-xl font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors"
+                onClick={() => setReviewEarlyExitModal({ open: false, request: null })}
+                disabled={reviewEarlyExitMutation.isPending}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-5 py-2.5 rounded-xl font-bold text-white bg-red-500 hover:bg-red-600 transition-colors shadow-lg shadow-red-200 flex items-center gap-2"
+                onClick={() => handleReviewEarlyExit('rejected')}
+                disabled={reviewEarlyExitMutation.isPending}
+              >
+                <X size={16} /> Reject
+              </button>
+              <button
+                className="px-5 py-2.5 rounded-xl font-bold text-white bg-emerald-500 hover:bg-emerald-600 transition-colors shadow-lg shadow-emerald-200 flex items-center gap-2"
+                onClick={() => handleReviewEarlyExit('approved')}
+                disabled={reviewEarlyExitMutation.isPending}
+              >
+                <Check size={16} /> Approve Early Exit
+              </button>
+            </div>
+          </div>
+        </Box>
+      </Modal>
+
     </div>
   );
 };

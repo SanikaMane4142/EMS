@@ -21,6 +21,9 @@ const MyLeaves = () => {
   const [leaves, setLeaves] = useState([]);
   const [balances, setBalances] = useState(null);
   const [isProbation, setIsProbation] = useState(false);
+  const [uploadingLeave, setUploadingLeave] = useState(null);
+  const [uploadFile, setUploadFile] = useState(null);
+  const [uploadingCert, setUploadingCert] = useState(false);
 
   const [formData, setFormData] = useState({
     type: 'casual_leave',
@@ -31,6 +34,28 @@ const MyLeaves = () => {
   });
 
   const [durationPreview, setDurationPreview] = useState({ totalDays: 0, isSandwich: false });
+
+  const handleOpenUploadModal = (leaveItem) => {
+    setUploadingLeave(leaveItem);
+    setUploadFile(null);
+  };
+
+  const handleUploadSubmit = async () => {
+    if (!uploadFile) {
+      return toast.error('Please select a file to upload');
+    }
+    try {
+      setUploadingCert(true);
+      await leaveService.submitMedicalCert(uploadingLeave.id, uploadFile, user.id);
+      toast.success('Medical certificate uploaded successfully!');
+      setUploadingLeave(null);
+      fetchHistory();
+    } catch (err) {
+      toast.error(err.message || 'Failed to upload certificate');
+    } finally {
+      setUploadingCert(false);
+    }
+  };
 
   const leaveTypeConfig = {
     'casual_leave': { label: 'Casual Leave (CL)', color: '#4f46e5', bg: '#f5f3ff', icon: Calendar, max: 20 },
@@ -135,9 +160,20 @@ const MyLeaves = () => {
       return toast.error('Please fill all fields');
     }
 
-    // Medical Doc check for SL >= 2 days
+    // Medical Doc check for SL >= 2 days - warning dialog for delayed upload
     if (formData.type === 'sick_leave' && durationPreview.totalDays >= 2 && !formData.medicalFile) {
-      return toast.error('Medical Proof Required: Sick leave for 2+ days requires a certificate.');
+      const deadlineDate = new Date(new Date(formData.end).getTime() + 20 * 24 * 60 * 60 * 1000);
+      const confirmSubmit = await Swal.fire({
+        title: 'Submit without Certificate?',
+        text: `You are applying for Medical/Sick Leave of 2+ days without a certificate. You must upload the certificate by ${deadlineDate.toLocaleDateString()} (within 20 days after your leave ends) to avoid conversion to Casual Leave or LWP.`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#635BFF',
+        cancelButtonColor: '#64748b',
+        confirmButtonText: 'Yes, Submit Request',
+        cancelButtonText: 'Cancel'
+      });
+      if (!confirmSubmit.isConfirmed) return;
     }
 
     try {
@@ -182,6 +218,45 @@ const MyLeaves = () => {
           <FilePlus size={18} /> Apply for Leave
         </button>
       </PageHeader>
+
+      {/* Delayed Medical Doc Warnings Banner */}
+      {leaves.filter(item => 
+        !item.is_deleted && 
+        item.status !== 'rejected' && 
+        (item.medical_doc_status === 'medical_doc_pending' || item.medical_doc_status === 'medical_doc_rejected')
+      ).map(item => {
+        const deadline = new Date(item.medical_doc_deadline);
+        const today = new Date();
+        const diffTime = deadline - today;
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        const isUrgent = diffDays <= 5;
+        
+        return (
+          <div key={item.id} className={`p-4 mb-6 rounded-2xl border flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm animate-in slide-in-from-top duration-300 ${isUrgent ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'}`}>
+            <div className="flex items-start gap-3">
+              <AlertCircle size={20} className={isUrgent ? 'text-red-600 mt-0.5' : 'text-amber-600 mt-0.5'} />
+              <div>
+                <h4 className={`text-sm font-bold ${isUrgent ? 'text-red-900' : 'text-amber-900'}`}>
+                  Medical Certificate Required {item.medical_doc_status === 'medical_doc_rejected' && '(Previously Rejected)'}
+                </h4>
+                <p className={`text-xs font-medium mt-0.5 ${isUrgent ? 'text-red-700' : 'text-amber-700'}`}>
+                  Your leave from <strong>{new Date(item.start_date).toLocaleDateString()} to {new Date(item.end_date).toLocaleDateString()}</strong> requires a certificate.
+                  Deadline to upload is <strong>{deadline.toLocaleDateString()}</strong> ({diffDays > 0 ? `${diffDays} days remaining` : 'overdue!'}).
+                  {item.verification_metadata?.rejection_reason && (
+                    <span className="block mt-1 text-[11px] italic font-bold text-red-600">Rejection reason: "{item.verification_metadata.rejection_reason}"</span>
+                  )}
+                </p>
+              </div>
+            </div>
+            <button 
+              className={`btn-ems btn-ems-primary !h-9 !text-xs !px-4 flex items-center gap-2 whitespace-nowrap shadow-md ${isUrgent ? '!bg-red-600 hover:!bg-red-700' : ''}`}
+              onClick={() => handleOpenUploadModal(item)}
+            >
+              <FilePlus size={14} /> Upload Certificate
+            </button>
+          </div>
+        );
+      })}
 
       {/* Leave Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
@@ -265,11 +340,52 @@ const MyLeaves = () => {
                 </div>
 
                 <div className="flex items-center gap-6">
+                  {item.medical_doc_status && (
+                    <div className="flex items-center gap-2">
+                      <span className={`badge-pill ${
+                        item.medical_doc_status === 'medical_doc_verified' ? 'success' :
+                        item.medical_doc_status === 'medical_doc_submitted' ? 'info' :
+                        item.medical_doc_status === 'medical_doc_pending' ? 'warning' :
+                        item.medical_doc_status === 'medical_doc_rejected' ? 'danger' : 'neutral'
+                      }`}>
+                        {item.medical_doc_status === 'medical_doc_verified' ? 'DOC VERIFIED' :
+                         item.medical_doc_status === 'medical_doc_submitted' ? 'DOC SUBMITTED' :
+                         item.medical_doc_status === 'medical_doc_pending' ? 'DOC PENDING' :
+                         item.medical_doc_status === 'medical_doc_rejected' ? 'DOC REJECTED' : 'DOC EXPIRED'}
+                      </span>
+                      {!item.is_deleted && 
+                        item.status !== 'rejected' && 
+                        (item.medical_doc_status === 'medical_doc_pending' || item.medical_doc_status === 'medical_doc_rejected') && 
+                        (!item.medical_doc_deadline || new Date() <= new Date(item.medical_doc_deadline)) && (
+                          <button 
+                            onClick={() => handleOpenUploadModal(item)}
+                            className="btn-ems btn-ems-primary !h-7 !text-[11px] !px-2.5 flex items-center gap-1 shadow-sm hover:scale-[1.02] transition-transform active:scale-[0.98]"
+                            title="Upload Medical Certificate"
+                          >
+                            <FilePlus size={12} /> Upload
+                          </button>
+                        )
+                      }
+                    </div>
+                  )}
                   <span className={`badge-pill ${item.is_deleted ? 'danger' : item.status === 'approved' ? 'success' : item.status === 'rejected' ? 'danger' : 'warning'}`}>
                     {item.is_deleted ? 'DELETED' : item.status.toUpperCase()}
                   </span>
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button className="btn-icon-ems" onClick={() => handleOpenView(item)}><Eye size={16} /></button>
+                    {!item.is_deleted && 
+                      item.status !== 'rejected' && 
+                      (item.medical_doc_status === 'medical_doc_pending' || item.medical_doc_status === 'medical_doc_rejected') && 
+                      (!item.medical_doc_deadline || new Date() <= new Date(item.medical_doc_deadline)) && (
+                        <button 
+                          className="btn-icon-ems text-indigo-600 hover:text-indigo-700" 
+                          title="Upload Medical Certificate"
+                          onClick={() => handleOpenUploadModal(item)}
+                        >
+                          <FilePlus size={16} />
+                        </button>
+                      )
+                    }
                     {!item.is_deleted && (item.status === 'pending' || item.status === 'pending_hr' || item.status === 'pending_super_admin') && <button className="btn-icon-ems text-red-500" onClick={() => handleDeleteLeave(item.id)}><Trash2 size={16} /></button>}
                   </div>
                 </div>
@@ -355,15 +471,39 @@ const MyLeaves = () => {
 
             {formData.type === 'sick_leave' && durationPreview.totalDays >= 2 && (
               <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl">
-                <label className="text-xs font-bold text-blue-700 uppercase tracking-widest block mb-2">Medical Certificate (Mandatory)</label>
-                <input
-                  type="file"
-                  className="text-xs text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-black file:bg-blue-600 file:text-white hover:file:bg-blue-700 disabled:opacity-50"
-                  onChange={(e) => setFormData(prev => ({ ...prev, medicalFile: e.target.files[0] }))}
-                  accept=".pdf,.jpg,.png,.docx"
-                  disabled={modalMode === 'view'}
-                />
-                <p className="text-[10px] text-blue-500 mt-2">Required for sick leave of 2 or more days.</p>
+                <label className="text-xs font-bold text-blue-700 uppercase tracking-widest block mb-2">Medical Certificate</label>
+                {modalMode === 'view' && selectedLeaveId && leaves.find(l => l.id === selectedLeaveId)?.medical_doc_url ? (
+                  <div className="flex flex-col gap-2">
+                    <a 
+                      href={leaves.find(l => l.id === selectedLeaveId).medical_doc_url} 
+                      target="_blank" 
+                      rel="noreferrer" 
+                      className="inline-flex items-center gap-2 text-xs font-black text-indigo-600 hover:underline bg-white px-3 py-2 rounded-lg border border-indigo-100"
+                    >
+                      <Eye size={14} /> View Uploaded Certificate
+                    </a>
+                    <span className="text-[9px] font-bold text-slate-500">
+                      Status: <strong className="uppercase">{leaves.find(l => l.id === selectedLeaveId).medical_doc_status?.replace(/_/g, ' ')}</strong>
+                    </span>
+                  </div>
+                ) : modalMode === 'view' ? (
+                  <p className="text-xs text-slate-500 italic">No medical certificate uploaded yet.</p>
+                ) : (
+                  <>
+                    <p className="text-[10px] text-blue-600 mb-2 font-medium">
+                      <strong>⏰ Flexible Policy:</strong> You can upload this certificate now or later (within 20 days after leave ends).
+                    </p>
+                    <input
+                      type="file"
+                      className="text-xs text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-black file:bg-blue-600 file:text-white hover:file:bg-blue-700"
+                      onChange={(e) => setFormData(prev => ({ ...prev, medicalFile: e.target.files[0] }))}
+                      accept=".pdf,.jpg,.jpeg,.png,.docx"
+                    />
+                    <p className="text-[10px] text-red-500 mt-2 font-bold leading-tight">
+                      ⚠️ WARNING: Failure to upload within 20 days after the leave ends may result in conversion to Casual Leave or LWP.
+                    </p>
+                  </>
+                )}
               </div>
             )}
             <div>
@@ -389,6 +529,47 @@ const MyLeaves = () => {
               {submitting ? 'Submitting...' : 'Submit Request'}
             </button>
           )}
+        </DialogActions>
+      </Dialog>
+
+      {/* Upload Medical Certificate Modal */}
+      <Dialog open={uploadingLeave !== null} onClose={() => setUploadingLeave(null)} maxWidth="xs" fullWidth
+        slotProps={{ paper: { sx: { borderRadius: '20px', p: 1 } } }}>
+        <DialogTitle sx={{ fontWeight: 800, fontFamily: 'Inter', display: 'flex', justifyContent: 'space-between', alignItems: 'center', pb: 1 }}>
+          Upload Medical Certificate
+          <IconButton onClick={() => setUploadingLeave(null)} size="small"><X size={20} /></IconButton>
+        </DialogTitle>
+        <DialogContent>
+          {uploadingLeave && (
+            <div className="flex flex-col gap-4 pt-2">
+              <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-xl">
+                <p className="text-[11px] font-bold text-indigo-800 leading-tight">
+                  Leave Period: <strong>{new Date(uploadingLeave.start_date).toLocaleDateString()} to {new Date(uploadingLeave.end_date).toLocaleDateString()}</strong>
+                </p>
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Deadline to submit: <strong>{new Date(uploadingLeave.medical_doc_deadline).toLocaleDateString()}</strong>
+                </p>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-2">Select Certificate File</label>
+                <input
+                  type="file"
+                  className="text-xs text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-black file:bg-indigo-600 file:text-white hover:file:bg-indigo-700 w-full"
+                  onChange={(e) => setUploadFile(e.target.files[0])}
+                  accept=".pdf,.jpg,.jpeg,.png,.docx"
+                />
+                <p className="text-[10px] text-slate-400 mt-2">Accepted formats: PDF, JPG, PNG, DOCX (Max 5MB)</p>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 3 }}>
+          <button className="btn-ems btn-ems-secondary" onClick={() => setUploadingLeave(null)}>
+            Cancel
+          </button>
+          <button className="btn-ems btn-ems-primary !px-8" disabled={uploadingCert || !uploadFile} onClick={handleUploadSubmit}>
+            {uploadingCert ? 'Uploading...' : 'Upload File'}
+          </button>
         </DialogActions>
       </Dialog>
 

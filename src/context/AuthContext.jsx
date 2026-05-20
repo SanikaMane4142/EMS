@@ -33,7 +33,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const { data, error: profileError } = await supabase
         .from('profiles')
-        .select('*')
+        .select('*, departments!profiles_department_id_fkey(name)')
         .eq('id', userId)
         .single();
 

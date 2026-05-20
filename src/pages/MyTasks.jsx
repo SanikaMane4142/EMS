@@ -171,7 +171,8 @@ const SortableSubtaskItem = ({ item, onToggle, canEdit = true, onDelete }) => {
       </div>
 
       <div className="flex items-center justify-end gap-6">
-        <div className="flex items-center justify-end w-[160px]">
+        {/* Column 1: Created At */}
+        <div className="flex items-center justify-end w-[110px]">
           {item.createdTime && (
             <div className="flex items-center gap-1.5 text-[8px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">
               <Calendar size={12} className="text-slate-300" />
@@ -180,24 +181,20 @@ const SortableSubtaskItem = ({ item, onToggle, canEdit = true, onDelete }) => {
           )}
         </div>
 
-        <div className="flex items-center justify-end w-[160px]">
+        {/* Column 2: Updated At */}
+        <div className="flex items-center justify-end w-[110px]">
           {(item.updatedTime || item.date) && (
             <div className="flex items-center gap-1.5 text-[8px] font-bold text-indigo-500 uppercase tracking-widest whitespace-nowrap">
               <Clock size={12} className="text-indigo-400" />
               {item.updatedTime ? item.updatedTime : item.date}
             </div>
           )}
-          {canEdit && onDelete && (
-            <IconButton
-              size="small"
-              onClick={(e) => { e.stopPropagation(); onDelete(item); }}
-              className="ml-2 w-6 h-6 rounded text-slate-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover/item:opacity-100 transition-all"
-            >
-              <Trash2 size={13} />
-            </IconButton>
-          )}
         </div>
 
+        {/* Column 3: Progress (blank spacer for subtasks) */}
+        <div className="w-[70px]" />
+
+        {/* Column 4: Status (Checkbox) */}
         <div className="w-[48px] flex justify-center">
           <button
             disabled={!canEdit}
@@ -210,8 +207,21 @@ const SortableSubtaskItem = ({ item, onToggle, canEdit = true, onDelete }) => {
             <Check size={11} strokeWidth={3} className={`transition-transform duration-300 ${item.isCompleted ? 'scale-100' : 'scale-0'}`} />
           </button>
         </div>
+
+        {/* Column 5: Actions */}
+        <div className="flex items-center justify-end w-[80px]">
+          {canEdit && onDelete && (
+            <IconButton
+              size="small"
+              onClick={(e) => { e.stopPropagation(); onDelete(item); }}
+              className="w-6 h-6 rounded text-slate-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover/item:opacity-100 transition-all"
+            >
+              <Trash2 size={13} />
+            </IconButton>
+          )}
+        </div>
         
-        {/* Trailing spacer to match group arrow column */}
+        {/* Column 6: Trailing spacer to match group arrow column */}
         <div className="w-[28px]" />
       </div>
     </div>
@@ -248,7 +258,8 @@ const SortableGroup = ({ group, index, expanded, onToggle, onAddItem, isLast, on
           </div>
 
           <div className="flex items-center justify-end gap-6">
-            <div className="flex items-center justify-end w-[160px]">
+            {/* Column 1: Created At */}
+            <div className="flex items-center justify-end w-[110px]">
               {group.createdTime && (
                 <div className="flex items-center gap-1.5 text-[8px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">
                   <Calendar size={12} className="text-slate-300" />
@@ -256,10 +267,46 @@ const SortableGroup = ({ group, index, expanded, onToggle, onAddItem, isLast, on
                 </div>
               )}
             </div>
-            <div className="flex items-center justify-end gap-1 w-[160px]">
+
+            {/* Column 2: Updated At */}
+            <div className="flex items-center justify-end w-[110px]">
+              {group.updatedTime && (
+                <div className="flex items-center gap-1.5 text-[8px] font-bold text-indigo-500 uppercase tracking-widest whitespace-nowrap">
+                  <Clock size={12} className="text-indigo-400" />
+                  {group.updatedTime}
+                </div>
+              )}
+            </div>
+
+            {/* Column 3: Progress/Done Badge */}
+            <div className="flex items-center justify-center w-[70px]">
               <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md border ${group.items.length > 0 && group.items.every(i => i.isCompleted) ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>
                 {group.items.filter(i => i.isCompleted).length}/{group.items.length} DONE
               </span>
+            </div>
+
+            {/* Column 4: Status (Checkbox) */}
+            <div className="w-[48px] flex justify-center">
+              <button
+                disabled={!canEdit}
+                onClick={(e) => { e.stopPropagation(); onToggleGroup(group.id, !isGroupCompleted); }}
+                className={`w-4.5 h-4.5 rounded flex items-center justify-center transition-all duration-300 ${isGroupCompleted
+                  ? 'bg-emerald-500 text-white border-emerald-500 shadow-lg shadow-emerald-500/20'
+                  : group.items.length > 0 && !group.items.every(i => i.isCompleted)
+                    ? 'bg-slate-50 border-2 border-slate-100 text-slate-200 cursor-not-allowed'
+                    : 'bg-white border-2 border-slate-200 text-transparent hover:border-emerald-500 hover:bg-emerald-50'
+                  } ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                {group.items.length > 0 && !group.items.every(i => i.isCompleted) && !isGroupCompleted ? (
+                  <AlertCircle size={10} />
+                ) : (
+                  <Check size={11} strokeWidth={3} className={`transition-transform duration-300 ${isGroupCompleted ? 'scale-100' : 'scale-0'}`} />
+                )}
+              </button>
+            </div>
+
+            {/* Column 5: Actions */}
+            <div className="flex items-center justify-end gap-1 w-[80px]">
               {canEdit && (
                 <IconButton
                   size="small"
@@ -287,25 +334,6 @@ const SortableGroup = ({ group, index, expanded, onToggle, onAddItem, isLast, on
                   <Trash2 size={13} />
                 </IconButton>
               )}
-            </div>
-
-            <div className="w-[48px] flex justify-center">
-              <button
-                disabled={!canEdit}
-                onClick={(e) => { e.stopPropagation(); onToggleGroup(group.id, !isGroupCompleted); }}
-                className={`w-4.5 h-4.5 rounded flex items-center justify-center transition-all duration-300 ${isGroupCompleted
-                  ? 'bg-emerald-500 text-white border-emerald-500 shadow-lg shadow-emerald-500/20'
-                  : group.items.length > 0 && !group.items.every(i => i.isCompleted)
-                    ? 'bg-slate-50 border-2 border-slate-100 text-slate-200 cursor-not-allowed'
-                    : 'bg-white border-2 border-slate-200 text-transparent hover:border-emerald-500 hover:bg-emerald-50'
-                  } ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
-              >
-                {group.items.length > 0 && !group.items.every(i => i.isCompleted) && !isGroupCompleted ? (
-                  <AlertCircle size={10} />
-                ) : (
-                  <Check size={11} strokeWidth={3} className={`transition-transform duration-300 ${isGroupCompleted ? 'scale-100' : 'scale-0'}`} />
-                )}
-              </button>
             </div>
 
             <div className="w-[28px] flex justify-center">
@@ -1035,9 +1063,11 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
                   <div className="w-6" /> {/* Index Spacer */}
                   <span className="flex-1 ml-2">Task Description</span>
                   <div className="flex items-center justify-end gap-6">
-                    <span className="w-[160px] text-right">Created At</span>
-                    <span className="w-[160px] text-right">Updated At</span>
+                    <span className="w-[110px] text-right">Created At</span>
+                    <span className="w-[110px] text-right">Updated At</span>
+                    <span className="w-[70px] text-center">Progress</span>
                     <span className="w-[48px] text-center">Status</span>
+                    <span className="w-[80px] text-right">Actions</span>
                     <span className="w-[28px]"></span>
                   </div>
                 </div>
@@ -1070,12 +1100,6 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
                 </div>
               </div>
 
-              {canEdit && (
-                <div className="py-2.5 rounded-[12px] border border-dashed border-slate-200/50 bg-slate-50/20 flex items-center justify-center gap-2.5 text-slate-300 transition-all">
-                  <Share2 size={14} />
-                  <span className="text-[9px] font-bold uppercase tracking-[0.15em]">Drag and reorder any group or row</span>
-                </div>
-              )}
 
               {/* Activity / Feedback Section */}
               <div className="mt-8 flex flex-col gap-5">
@@ -1086,24 +1110,24 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{comments.length} Comments</span>
                 </div>
 
-                <div className="bg-white rounded-[24px] border border-slate-100 shadow-sm p-6 overflow-hidden">
-                  <div className="flex flex-col gap-6">
+                 <div className="bg-white rounded-[24px] border border-slate-100 shadow-sm p-5 overflow-hidden">
+                  <div className="flex flex-col gap-5">
                     {commentsLoading ? (
                       <div className="flex flex-col gap-4">
                         {[1, 2].map(i => <Skeleton key={i} variant="rounded" height={60} sx={{ borderRadius: '16px' }} />)}
                       </div>
                     ) : comments.length === 0 ? (
-                      <div className="py-10 flex flex-col items-center justify-center gap-3 opacity-30">
-                        <div className="w-16 h-16 rounded-3xl bg-slate-100 flex items-center justify-center">
-                          <MessageCircle size={32} className="text-slate-400" />
+                      <div className="py-5 flex flex-col items-center justify-center gap-2 opacity-30">
+                        <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center">
+                          <MessageCircle size={22} className="text-slate-400" />
                         </div>
-                        <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-500">No feedback yet</p>
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">No feedback yet</p>
                       </div>
                     ) : (
                       <div className="flex flex-col gap-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                         {comments.map((comment) => (
                           <div key={comment.id} className="flex gap-4 group animate-in slide-in-from-bottom-2 duration-300">
-                            <Avatar sx={{ width: 32, height: 32, bgcolor: 'var(--primary-light)', color: 'var(--primary)', fontWeight: 800, fontSize: 11, border: '2px solid white', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+                            <Avatar sx={{ width: 28, height: 28, bgcolor: 'var(--primary-light)', color: 'var(--primary)', fontWeight: 800, fontSize: 10, border: '2px solid white', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
                               {comment.author?.full_name?.charAt(0) || 'U'}
                             </Avatar>
                             <div className="flex-1 min-w-0">
@@ -1113,7 +1137,7 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
                                   {new Date(comment.created_at).toLocaleDateString([], { day: 'numeric', month: 'short' })} • {new Date(comment.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                 </span>
                               </div>
-                              <div className={`relative text-xs leading-relaxed p-3.5 rounded-2xl rounded-tl-none border transition-all duration-500 ${comment.message.includes('Approved') ? 'bg-emerald-50/50 border-emerald-100 text-emerald-800' :
+                              <div className={`relative text-xs leading-relaxed p-3 rounded-2xl rounded-tl-none border transition-all duration-500 ${comment.message.includes('Approved') ? 'bg-emerald-50/50 border-emerald-100 text-emerald-800' :
                                 comment.message.includes('Changes Requested') ? (comment.is_resolved ? 'bg-emerald-50/50 border-emerald-100 text-emerald-800' : 'bg-red-50/50 border-red-100 text-red-800') :
                                   'bg-slate-50/80 border-slate-100 text-slate-600'
                                 }`}>
@@ -1142,14 +1166,14 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
                     )}
 
                     {/* Add Comment Input */}
-                    <div className="mt-2 pt-6 border-t border-slate-50 flex items-start gap-4">
-                      <Avatar sx={{ width: 32, height: 32, bgcolor: 'var(--primary-light)', color: 'var(--primary)', fontWeight: 800, fontSize: 11 }}>
+                    <div className="mt-0 pt-4 border-t border-slate-50 flex items-start gap-3">
+                      <Avatar sx={{ width: 28, height: 28, bgcolor: 'var(--primary-light)', color: 'var(--primary)', fontWeight: 800, fontSize: 10 }}>
                         {(profile?.full_name || 'U').charAt(0)}
                       </Avatar>
                       <div className="flex-1 relative group">
                         <textarea
                           placeholder="Type a message or provide feedback..."
-                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3.5 pr-14 text-xs font-medium placeholder:text-slate-400 focus:bg-white focus:ring-4 focus:ring-primary/5 focus:border-primary transition-all resize-none min-h-[48px] shadow-inner"
+                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-2.5 pr-12 text-xs font-medium placeholder:text-slate-400 focus:bg-white focus:ring-4 focus:ring-primary/5 focus:border-primary transition-all resize-none min-h-[38px] shadow-inner"
                           rows={1}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter' && !e.shiftKey) {
@@ -1382,7 +1406,7 @@ const TaskGrid = ({ tasks, onTaskClick, onTaskMenuClick, currentUserId, onSubmit
                 </div>
               </div>
 
-              <div className="flex flex-col items-end gap-1 shrink-0 ml-2">
+              <div className="flex items-center shrink-0 ml-2">
                 <IconButton
                   size="small"
                   className="text-slate-200 opacity-0 group-hover:opacity-100 transition-opacity p-1"
@@ -1393,19 +1417,21 @@ const TaskGrid = ({ tasks, onTaskClick, onTaskMenuClick, currentUserId, onSubmit
                 >
                   <MoreVertical size={16} />
                 </IconButton>
-                <StatusChip status={task.status} />
               </div>
             </div>
 
             {/* Separator */}
             <div className="h-px bg-slate-50 w-full mb-4" />
 
-            {/* Priority Icon */}
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-3 ${task.priority === 'High' ? 'bg-red-50 text-red-500' :
-              task.priority === 'Medium' ? 'bg-amber-50 text-amber-600' : 'bg-primary-light text-primary'
-              }`}>
-              {task.priority === 'High' ? <AlertCircle size={20} /> :
-                task.priority === 'Medium' ? <Briefcase size={20} /> : <CheckCircle size={20} />}
+            {/* Priority Icon & Status Chip */}
+            <div className="flex items-center gap-3 mb-3">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${task.priority === 'High' ? 'bg-red-50 text-red-500' :
+                task.priority === 'Medium' ? 'bg-amber-50 text-amber-600' : 'bg-primary-light text-primary'
+                }`}>
+                {task.priority === 'High' ? <AlertCircle size={20} /> :
+                  task.priority === 'Medium' ? <Briefcase size={20} /> : <CheckCircle size={20} />}
+              </div>
+              <StatusChip status={task.status} />
             </div>
 
             {/* Title & Deadline */}

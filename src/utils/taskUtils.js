@@ -32,6 +32,7 @@ export const normalizeTask = (t) => ({
       ...g,
       isCompleted: g.is_completed,
       createdTime: formatDate(g.created_at || g.updated_at),
+      updatedTime: formatDate(g.updated_at),
       items: (g.subtasks || [])
         .filter(s => !s.is_deleted)
         .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.id.localeCompare(b.id))

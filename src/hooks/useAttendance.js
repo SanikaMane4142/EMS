@@ -181,3 +181,75 @@ export const useIpChangeLogs = (limit = 30) => {
   });
 };
 
+export const useAuthorizedEarlyPunchOut = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ attendanceId, reason, note, markFullDay }) =>
+      attendanceService.authorizedEarlyPunchOut(attendanceId, reason, note, markFullDay),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['attendance', 'overview'] });
+      queryClient.invalidateQueries({ queryKey: ['attendance', 'stats'] });
+      queryClient.invalidateQueries({ queryKey: ['attendance', 'active'] });
+      queryClient.invalidateQueries({ queryKey: ['attendance', 'history'] });
+      queryClient.invalidateQueries({ queryKey: ['attendance', 'override_logs'] });
+    },
+  });
+};
+
+export const useOverrideLogs = (attendanceId) => {
+  return useQuery({
+    queryKey: ['attendance', 'override_logs', attendanceId],
+    queryFn: () => attendanceService.getOverrideLogs(attendanceId),
+    enabled: !!attendanceId,
+  });
+};
+
+export const useSubmitEarlyExitRequest = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ employeeId, attendanceId, reason, note }) =>
+      attendanceService.submitEarlyExitRequest(employeeId, attendanceId, reason, note),
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['attendance', 'early_exit_requests', 'my', variables.attendanceId] });
+      queryClient.invalidateQueries({ queryKey: ['attendance', 'early_exit_requests', 'pending'] });
+    },
+  });
+};
+
+export const useMyEarlyExitRequest = (attendanceId) => {
+  return useQuery({
+    queryKey: ['attendance', 'early_exit_requests', 'my', attendanceId],
+    queryFn: () => attendanceService.getMyEarlyExitRequest(attendanceId),
+    enabled: !!attendanceId,
+  });
+};
+
+export const usePendingEarlyExitRequests = () => {
+  return useQuery({
+    queryKey: ['attendance', 'early_exit_requests', 'pending'],
+    queryFn: () => attendanceService.getPendingEarlyExitRequests(),
+  });
+};
+
+export const useReviewEarlyExitRequest = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ requestId, status, reviewerNote, markFullDay }) =>
+      attendanceService.reviewEarlyExitRequest(requestId, status, reviewerNote, markFullDay),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['attendance'] });
+    },
+  });
+};
+
+export const useEmployeeApprovedEarlyPunchOut = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ attendanceId }) => attendanceService.employeeApprovedEarlyPunchOut(attendanceId),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['attendance'] });
+      // Reset active attendance to null so UI knows they are punched out
+      queryClient.setQueryData(['attendance', 'active', data.user_id], null);
+    },
+  });
+};

@@ -761,3 +761,8 @@ a:hover {
   color: var(--text-muted);
   font-size: 15px;
 }
+
+/* Ensure SweetAlert2 overlays on top of MUI Dialogs and other modals */
+.swal2-container {
+  z-index: 99999 !important;
+}

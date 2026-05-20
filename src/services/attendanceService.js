@@ -137,9 +137,9 @@ export const attendanceService = {
     if (error) throw error;
 
     // Manually ensure lunch_start_time is recorded for tooltip/history
-    await supabase.from('attendance').update({ 
+    await supabase.from('attendance').update({
       lunch_start_time: now,
-      lunch_end_time: null 
+      lunch_end_time: null
     }).eq('id', recordId);
 
     console.log('[Attendance] Started lunch break and preserved start time');
@@ -401,6 +401,27 @@ export const attendanceService = {
     return filtered.map(item => {
       const p = item.profiles || {};
       const lunchMin = item.lunch_duration_ms ? Math.round(item.lunch_duration_ms / 60000) : 0;
+
+      // Determine display status — force punch-out overrides
+      let displayStatus;
+      if (item.is_force_punched_out) {
+        displayStatus = item.approved_full_day ? 'Early Exit Approved' : 'Early Exit';
+      } else if (item.status === 'punched_in') {
+        displayStatus = 'Present';
+      } else if (item.status === 'punched_out' || item.status === 'auto_punched_out') {
+        displayStatus = 'Left';
+      } else if (item.status === 'on_leave') {
+        displayStatus = 'On Leave';
+      } else if (item.status === 'absent_unjustified') {
+        displayStatus = 'Absent !';
+      } else if (item.status === 'absent_explanation_pending') {
+        displayStatus = 'Reason Pending';
+      } else if (item.status === 'absent_explained') {
+        displayStatus = 'Absent Explained';
+      } else {
+        displayStatus = 'Absent';
+      }
+
       return {
         id: item.id,
         date: item.attendance_date,
@@ -411,14 +432,7 @@ export const attendanceService = {
         dept: p.departments?.name || p.designation || 'Staff',
         punchIn: item.punch_in_time ? new Date(item.punch_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-',
         punchOut: item.punch_out_time ? new Date(item.punch_out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-',
-        status:
-          item.status === 'punched_in' ? 'Present'
-            : (item.status === 'punched_out' || item.status === 'auto_punched_out') ? 'Left'
-              : item.status === 'on_leave' ? 'On Leave'
-                : item.status === 'absent_unjustified' ? 'Absent !'
-                  : item.status === 'absent_explanation_pending' ? 'Reason Pending'
-                    : item.status === 'absent_explained' ? 'Absent Explained'
-                      : 'Absent',
+        status: displayStatus,
         absenceExplanation: item.attendance_explanations?.[0] || null,
         lunchDuration: lunchMin,
         lunchStart: item.lunch_start_time ? new Date(item.lunch_start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null,
@@ -429,7 +443,17 @@ export const attendanceService = {
         punch_out_time: item.punch_out_time,
         lunch_start_time: item.lunch_start_time,
         lunch_end_time: item.lunch_end_time,
-        lunch_duration_ms: item.lunch_duration_ms
+        lunch_duration_ms: item.lunch_duration_ms,
+        // Force punch-out fields
+        is_force_punched_out: item.is_force_punched_out || false,
+        force_punch_out_by: item.force_punch_out_by,
+        force_punch_out_reason: item.force_punch_out_reason,
+        force_punch_out_note: item.force_punch_out_note,
+        force_punch_out_at: item.force_punch_out_at,
+        approved_full_day: item.approved_full_day || false,
+        approved_work_hours: item.approved_work_hours,
+        actual_work_hours: item.actual_work_hours,
+        user_id: item.user_id
       };
     });
   },
@@ -502,5 +526,132 @@ export const attendanceService = {
       .limit(limit);
     if (error) throw error;
     return data || [];
+  },
+
+  /**
+   * [HR/ADMIN] Authorized Early Punch-Out — calls secure RPC
+   */
+  async authorizedEarlyPunchOut(attendanceId, reason, note, markFullDay = false) {
+    const { data, error } = await supabase.rpc('authorized_early_punch_out', {
+      p_attendance_id: attendanceId,
+      p_reason: reason,
+      p_note: note,
+      p_mark_full_day: markFullDay,
+    });
+
+    if (error) throw error;
+    console.log('[Attendance] Authorized early punch-out completed:', data?.id);
+    return data;
+  },
+
+  /**
+   * [HR/ADMIN] Get override logs for a specific attendance record
+   */
+  async getOverrideLogs(attendanceId) {
+    const { data, error } = await supabase
+      .from('attendance_override_logs')
+      .select(`
+        *,
+        employee:employee_id ( full_name, email, employee_id ),
+        approver:action_by ( full_name, email )
+      `)
+      .eq('attendance_id', attendanceId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    if (error) throw error;
+    return data || [];
+  },
+
+  /**
+   * [EMPLOYEE] Submit a request for an early exit
+   */
+  async submitEarlyExitRequest(employeeId, attendanceId, reason, note) {
+    // Ensure they don't already have a pending request
+    const { data: existing, error: checkError } = await supabase
+      .from('early_exit_requests')
+      .select('id')
+      .eq('attendance_id', attendanceId)
+      .eq('status', 'pending')
+      .maybeSingle();
+
+    if (checkError) throw checkError;
+    if (existing) {
+      throw new Error('You already have a pending early exit request.');
+    }
+
+    const { data, error } = await supabase
+      .from('early_exit_requests')
+      .insert({
+        employee_id: employeeId,
+        attendance_id: attendanceId,
+        reason,
+        note
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * [EMPLOYEE] Get the latest request for a specific attendance ID
+   */
+  async getMyEarlyExitRequest(attendanceId) {
+    if (!attendanceId) return null;
+    const { data, error } = await supabase
+      .from('early_exit_requests')
+      .select('*')
+      .eq('attendance_id', attendanceId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * [HR/ADMIN] Get all pending early exit requests for today
+   */
+  async getPendingEarlyExitRequests() {
+    const { data, error } = await supabase
+      .from('early_exit_requests')
+      .select(`
+        *,
+        employee:employee_id (full_name, email, employee_id),
+        attendance:attendance_id (punch_in_time)
+      `)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  /**
+   * [HR/ADMIN] Approve or Reject an early exit request (calls RPC if approved)
+   */
+  async reviewEarlyExitRequest(requestId, status, reviewerNote, markFullDay = false) {
+    const { data, error } = await supabase.rpc('review_early_exit_request', {
+      p_request_id: requestId,
+      p_status: status,
+      p_reviewer_note: reviewerNote,
+      p_mark_full_day: markFullDay
+    });
+
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * [EMPLOYEE] Manually punch out using an approved early exit request
+   */
+  async employeeApprovedEarlyPunchOut(attendanceId) {
+    validateDevice();
+    const { data, error } = await supabase.rpc('employee_approved_early_punch_out', {
+      p_attendance_id: attendanceId
+    });
+    if (error) throw error;
+    return data;
   }
 };
