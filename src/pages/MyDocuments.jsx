@@ -1,21 +1,117 @@
-import React from "react";
-import { FileText, Download, Plus, Folder, Calendar, Clock, ShieldCheck, MoreVertical, Grid2X2, List, ChevronDown } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { FileText, Download, Plus, Folder, Calendar, Clock, ShieldCheck, MoreVertical, Grid2X2, List, ChevronDown, UploadCloud, Trash2 } from "lucide-react";
 import { Box, Chip, Avatar } from '@mui/material';
 import PageHeader from '../components/PageHeader';
+import { useAuth } from '../context/AuthContext';
+import { documentService } from '../services/documentService';
+import Swal from 'sweetalert2';
 
 const MyDocuments = () => {
-  const docs = [
-    { name: "Offer_Letter_Jane_Doe.pdf", type: "PDF", size: "1.2 MB", date: "12 Jan, 2024", category: "Employment" },
-    { name: "Payslip_March_2026.pdf", type: "PDF", size: "450 KB", date: "01 Apr, 2026", category: "Payslip" },
-    { name: "Policy_Manual_2026.pdf", type: "PDF", size: "2.5 MB", date: "05 Jan, 2026", category: "Policy" },
-  ];
+  const { user: currentUser } = useAuth();
+  const [documents, setDocuments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+
+  const fetchDocuments = async () => {
+    try {
+      setLoading(true);
+      const docs = await documentService.getUserDocuments(currentUser.id);
+      setDocuments(docs || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (currentUser?.id) {
+      fetchDocuments();
+    }
+  }, [currentUser?.id]);
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 7 * 1024 * 1024) {
+      Swal.fire('Error', 'File size must be less than 7MB', 'error');
+      return;
+    }
+    const validTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    if (!validTypes.includes(file.type)) {
+      Swal.fire('Error', 'Only PDF or Word documents are allowed', 'error');
+      return;
+    }
+
+    try {
+      setUploadingDoc(true);
+      await documentService.uploadDocument(currentUser.id, file, {
+        category: 'Verification',
+        title: file.name,
+        uploadedBy: currentUser.id
+      });
+      Swal.fire('Success', 'Verification document uploaded successfully', 'success');
+      fetchDocuments();
+    } catch (err) {
+      Swal.fire('Error', err.message, 'error');
+    } finally {
+      setUploadingDoc(false);
+      e.target.value = null;
+    }
+  };
+
+  const handleDownload = async (fileUrl, fileName) => {
+    try {
+      const url = await documentService.getDownloadUrl(fileUrl);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      a.target = '_blank';
+      a.click();
+    } catch (err) {
+      Swal.fire('Error', 'Could not download file', 'error');
+    }
+  };
+
+  const handleDelete = async (docId, fileUrl) => {
+    const result = await Swal.fire({
+      title: 'Are you sure?',
+      text: "You won't be able to revert this!",
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#ef4444',
+      cancelButtonColor: '#64748b',
+      confirmButtonText: 'Yes, delete it!'
+    });
+
+    if (result.isConfirmed) {
+      try {
+        await documentService.deleteDocument(docId, fileUrl);
+        Swal.fire('Deleted!', 'Your file has been deleted.', 'success');
+        fetchDocuments();
+      } catch (err) {
+        Swal.fire('Error', err.message, 'error');
+      }
+    }
+  };
 
   return (
     <div>
       <PageHeader title="My Documents" subtitle="Access and download your personal documents securely">
-        <button className="btn-ems btn-ems-primary">
-          <Plus size={18} /> Upload Document
-        </button>
+        <div>
+          <input 
+            type="file" 
+            id="emp-doc-upload" 
+            className="hidden" 
+            onChange={handleFileUpload} 
+            accept=".pdf,.doc,.docx" 
+            disabled={uploadingDoc}
+          />
+          <label htmlFor="emp-doc-upload" className={`btn-ems btn-ems-primary cursor-pointer ${uploadingDoc ? 'opacity-50 pointer-events-none' : ''}`}>
+            {uploadingDoc ? 'Uploading...' : <><Plus size={18} /> Upload Verification Doc</>}
+          </label>
+        </div>
       </PageHeader>
 
       <Box className="card-ems-static" sx={{ overflow: 'hidden' }}>
@@ -31,50 +127,55 @@ const MyDocuments = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <button className="btn-ems btn-ems-secondary !h-10 !text-xs">
-              Sort by: Newest <ChevronDown size={14} />
-            </button>
-            <div className="flex bg-slate-50 p-1 rounded-xl">
-              <button className="p-1.5 rounded-lg bg-white text-indigo-600 shadow-sm"><List size={16} /></button>
-              <button className="p-1.5 rounded-lg text-slate-400"><Grid2X2 size={16} /></button>
-            </div>
-          </div>
+
         </div>
 
         {/* Docs List */}
         <div className="p-4 flex flex-col gap-3">
-          {docs.map((doc, index) => (
-            <div key={index} className="flex items-center justify-between p-4 border border-slate-100 rounded-2xl transition-all hover:bg-slate-50 hover:border-indigo-100 group">
+          {loading ? (
+            <div className="p-8 text-center text-sm font-bold text-slate-400 animate-pulse">Loading documents...</div>
+          ) : documents.length === 0 ? (
+            <div className="p-12 text-center text-slate-400">
+              <FileText size={48} className="mx-auto mb-4 opacity-20" />
+              <p className="text-sm font-bold">No documents found.</p>
+            </div>
+          ) : documents.map((doc) => (
+            <div key={doc.id} className="flex items-center justify-between p-4 border border-slate-100 rounded-2xl transition-all hover:bg-slate-50 hover:border-indigo-100 group">
               <div className="flex items-center gap-5">
-                <div className="w-14 h-16 rounded-xl bg-red-50 border border-red-100 flex flex-col items-center justify-center gap-1 flex-shrink-0">
-                  <FileText size={24} className="text-red-500" />
-                  <span className="text-[8px] font-black bg-red-500 text-white px-1.5 rounded uppercase">PDF</span>
+                <div className={`w-14 h-16 rounded-xl border flex flex-col items-center justify-center gap-1 flex-shrink-0 ${doc.file_type?.includes('pdf') ? 'bg-red-50 border-red-100' : 'bg-blue-50 border-blue-100'}`}>
+                  <FileText size={24} className={doc.file_type?.includes('pdf') ? 'text-red-500' : 'text-blue-500'} />
+                  <span className={`text-[8px] font-black text-white px-1.5 rounded uppercase ${doc.file_type?.includes('pdf') ? 'bg-red-500' : 'bg-blue-500'}`}>
+                    {doc.file_type?.includes('pdf') ? 'PDF' : 'DOC'}
+                  </span>
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">{doc.name}</h3>
+                  <h3 className="text-sm font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">{doc.title}</h3>
                   <div className="flex items-center gap-3 mt-2 text-[11px] font-bold text-slate-400 uppercase tracking-tight">
-                    <span className="flex items-center gap-1"><FileText size={12} /> {doc.type}</span>
+                    <span className="flex items-center gap-1"><Clock size={12} /> {(doc.file_size / 1024 / 1024).toFixed(2)} MB</span>
                     <span>•</span>
-                    <span className="flex items-center gap-1"><Clock size={12} /> {doc.size}</span>
-                    <span>•</span>
-                    <span className="flex items-center gap-1"><Calendar size={12} /> {doc.date}</span>
+                    <span className="flex items-center gap-1"><Calendar size={12} /> {new Date(doc.created_at).toLocaleDateString()}</span>
                   </div>
                 </div>
               </div>
 
               <div className="flex items-center gap-4">
-                <Chip
-                  label={doc.category}
-                  size="small"
-                  sx={{
-                    fontWeight: 700, fontSize: 10,
-                    bgcolor: doc.category === 'Employment' ? '#eef2ff' : doc.category === 'Payslip' ? '#eff6ff' : '#ecfdf5',
-                    color: doc.category === 'Employment' ? '#4f46e5' : doc.category === 'Payslip' ? '#2563eb' : '#16a34a',
-                  }}
-                />
-                <button className="btn-icon-ems hover:bg-indigo-50 hover:text-indigo-600"><Download size={18} /></button>
-                <button className="btn-icon-ems"><MoreVertical size={18} /></button>
+
+                <button 
+                  onClick={() => handleDownload(doc.file_url, doc.file_name)}
+                  className="btn-icon-ems hover:bg-indigo-50 hover:text-indigo-600"
+                  title="Download"
+                >
+                  <Download size={18} />
+                </button>
+                {doc.uploaded_by === currentUser.id && (
+                  <button 
+                    onClick={() => handleDelete(doc.id, doc.file_url)}
+                    className="btn-icon-ems hover:bg-red-50 hover:text-red-600"
+                    title="Delete"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                )}
               </div>
             </div>
           ))}

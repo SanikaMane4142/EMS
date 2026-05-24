@@ -9,6 +9,9 @@ import {
 } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import PageHeader from '../components/PageHeader';
+import CountdownBanner from '../components/CountdownBanner';
+import { motion } from 'framer-motion';
+import { Sparkles as SparklesIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useAuthorizedEarlyPunchOut, usePendingEarlyExitRequests, useReviewEarlyExitRequest } from '../hooks/useAttendance';
 import { supabase } from '../lib/supabaseClient';
@@ -246,6 +249,9 @@ const HRDashboard = () => {
           <Megaphone size={16} /> Broadcast Notice
         </button>
       </PageHeader>
+      
+      {/* Countdown Hero Banner Section */}
+      <CountdownBanner />
 
       {/* KPI Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5 mb-6">
@@ -257,32 +263,37 @@ const HRDashboard = () => {
       </div>
 
       {/* Quick Access Modules */}
-      <Box className="card-ems-static" sx={{ p: 3, mb: 6 }}>
-        <h3 className="text-base font-bold text-slate-900 mb-5">Quick Access</h3>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <Box className="card-ems p-6 relative overflow-hidden bg-white shadow-sm border border-slate-100 mb-6" style={{ borderRadius: '24px' }}>
+        <div className="absolute top-0 right-0 w-32 h-32 opacity-5 pointer-events-none" style={{ backgroundImage: 'radial-gradient(#4f46e5 1px, transparent 1px)', backgroundSize: '12px 12px' }} />
+        <h3 className="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+          <Zap size={18} className="text-indigo-500" /> Command Operations Center
+        </h3>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           {[
-            { label: 'Employees', icon: Users, color: '#4f46e5', bg: '#eef2ff', path: '/employees' },
-            { label: 'Attendance', icon: Clock, color: '#10b981', bg: '#ecfdf5', path: '/attendance' },
-            { label: 'Leaves', icon: CalendarOff, color: '#ef4444', bg: '#fef2f2', path: '/leave' },
-            { label: 'Org Tasks', icon: CheckSquare, color: '#f59e0b', bg: '#fffbeb', path: '/organization-tasks' },
-            { label: 'Departments', icon: Building, color: '#7c3aed', bg: '#f5f3ff', path: '/departments' },
+            { label: 'Employees', icon: Users, color: '#4f46e5', bg: 'linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%)', path: '/employees' },
+            { label: 'Attendance', icon: Clock, color: '#10b981', bg: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)', path: '/attendance' },
+            { label: 'Leaves', icon: CalendarOff, color: '#ef4444', bg: 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)', path: '/leave' },
+            { label: 'Org Tasks', icon: CheckSquare, color: '#f59e0b', bg: 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)', path: '/organization-tasks' },
+            { label: 'Departments', icon: Building, color: '#7c3aed', bg: 'linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%)', path: '/departments' },
           ].map((mod, i) => {
             const Icon = mod.icon;
             return (
-              <div
+              <motion.div
                 key={i}
                 onClick={() => navigate(mod.path)}
-                className="flex flex-col items-center gap-3 p-5 rounded-xl cursor-pointer transition-all hover:-translate-y-1 hover:shadow-md border border-transparent"
+                className="flex flex-col items-center gap-3 p-5 rounded-2xl cursor-pointer transition-all border border-slate-100 shadow-sm"
                 style={{ background: mod.bg }}
+                whileHover={{ y: -5, scale: 1.02, boxShadow: '0 10px 20px rgba(0,0,0,0.05)' }}
+                whileTap={{ scale: 0.98 }}
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => { if (e.key === 'Enter') navigate(mod.path); }}
               >
-                <div className="p-3 rounded-xl" style={{ background: `${mod.color}20` }}>
-                  <Icon size={22} style={{ color: mod.color }} />
+                <div className="p-3 rounded-xl bg-white/70 shadow-sm backdrop-blur-sm">
+                  <Icon size={24} style={{ color: mod.color }} />
                 </div>
-                <span className="text-sm font-bold" style={{ color: mod.color }}>{mod.label}</span>
-              </div>
+                <span className="text-sm font-black tracking-tight" style={{ color: mod.color }}>{mod.label}</span>
+              </motion.div>
             );
           })}
         </div>

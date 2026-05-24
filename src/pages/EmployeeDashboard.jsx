@@ -26,6 +26,8 @@ import { supabase } from '../lib/supabaseClient';
 // New Components
 import CelebrationCard from '../components/CelebrationCard';
 import NoticeBoard from '../components/NoticeBoard';
+import CountdownBanner from '../components/CountdownBanner';
+import { motion } from 'framer-motion';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -740,7 +742,7 @@ const EmployeeDashboard = () => {
   return (
     <div className="animate-in fade-in duration-500">
       {/* Welcome Header */}
-      <Box sx={{ mb: 2 }}>
+      <Box sx={{ mb: 3 }}>
         <h1 className="text-2xl font-extrabold text-slate-900">
           {getGreeting()}, {profile?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'User'} 👋
         </h1>
@@ -753,6 +755,9 @@ const EmployeeDashboard = () => {
           <span className="text-sm text-slate-500 font-medium">{profile?.role?.toUpperCase()}</span>
         </Box>
       </Box>
+
+      {/* Countdown Hero Banner Section */}
+      <CountdownBanner />
 
       {/* Stats Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
@@ -809,7 +814,7 @@ const EmployeeDashboard = () => {
                 }}>
                 <div className="flex justify-between items-start mb-4">
                   <div>
-                    <div className="flex items-center gap-2 mb-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Shift Duration</span>
                       {ipStatus && (
                         <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${ipStatus.is_office_network ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
@@ -1229,7 +1234,6 @@ const EmployeeDashboard = () => {
 
         {/* Right Column */}
         <div className="lg:col-span-2 flex flex-col gap-6">
-
           {/* Notice Board */}
           <NoticeBoard announcements={announcements} />
 
