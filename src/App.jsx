@@ -116,10 +116,10 @@ function App() {
                 <Route path="/attendance" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><Attendance /></ProtectedRoute>} />
                 <Route path="/payroll" element={<ProtectedRoute allowedRoles={['super_admin']}><Payroll /></ProtectedRoute>} />
                 <Route path="/leave" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><LeaveManagement /></ProtectedRoute>} />
-                <Route path="/reports" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><Reports /></ProtectedRoute>} />
+                <Route path="/reports" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']} allowedDepartments={['ops', 'operations']}><Reports /></ProtectedRoute>} />
                 <Route path="/users" element={<ProtectedRoute allowedRoles={['super_admin']}><UsersPage /></ProtectedRoute>} />
                 <Route path="/settings" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><Settings /></ProtectedRoute>} />
-                <Route path="/organization-tasks" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><AdminTaskView /></ProtectedRoute>} />
+                <Route path="/organization-tasks" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']} allowedDepartments={['ops', 'operations']}><AdminTaskView /></ProtectedRoute>} />
                 <Route path="/ip-management" element={<ProtectedRoute allowedRoles={['hr', 'super_admin']}><IpManagement /></ProtectedRoute>} />
 
                 {/* Employee Modules */}

@@ -44,7 +44,7 @@ const Layout = ({ children }) => {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
-  const navLinks = profile ? getNavLinks(profile.role) : [];
+  const navLinks = profile ? getNavLinks(profile.role, profile) : [];
   const roleBadge = profile ? getRoleBadgeColor(profile.role) : {};
 
   useEffect(() => {

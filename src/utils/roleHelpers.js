@@ -42,7 +42,7 @@ export const getDashboardRoute = (dbRole) => {
 
 
 // ===== Navigation Configuration =====
-export const getNavLinks = (dbRole) => {
+export const getNavLinks = (dbRole, profile = null) => {
   const allLinks = [
     {
       to: getDashboardRoute(dbRole),
@@ -94,6 +94,7 @@ export const getNavLinks = (dbRole) => {
       icon: BarChart3,
       label: 'Reports',
       roles: ['super_admin', 'hr'],
+      departments: ['ops', 'operations'],
     },
     {
       to: '/my-documents',
@@ -112,6 +113,7 @@ export const getNavLinks = (dbRole) => {
       icon: ListTodo,
       label: 'Org Tasks',
       roles: ['super_admin', 'hr'],
+      departments: ['ops', 'operations'],
     },
     {
       to: '/departments',
@@ -136,7 +138,14 @@ export const getNavLinks = (dbRole) => {
 
   ];
 
-  return allLinks.filter(link => link.roles.includes(dbRole));
+  return allLinks.filter(link => {
+    if (link.roles.includes(dbRole)) return true;
+    if (profile && profile.departments && link.departments) {
+      const deptName = profile.departments.name?.toLowerCase() || '';
+      return link.departments.some(d => deptName.includes(d));
+    }
+    return false;
+  });
 };
 
 // ===== Page Title Mapping =====

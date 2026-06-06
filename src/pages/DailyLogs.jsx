@@ -15,6 +15,11 @@ const DailyLogs = () => {
   const [productivity, setProductivity] = useState("Medium");
   const [lastSaved, setLastSaved] = useState("");
 
+  const pastLogs = [
+    { id: 1, date: "27", month: "APR", title: "Finished User Authentication module", type: "Feature", time: 6.5 },
+    { id: 2, date: "26", month: "APR", title: "Resolved layout shifting on mobile", type: "Bug Fix", time: 4.0 },
+  ];
+
   // Simulated auto-fill from Task Management
   useEffect(() => {
     // In a real app, we'd query the DB for subtasks completed today by this user

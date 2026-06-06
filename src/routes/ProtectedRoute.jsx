@@ -5,7 +5,7 @@ import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { canAccess, getDashboardRoute } from '../utils/roleHelpers';
 
-const ProtectedRoute = ({ children, allowedRoles }) => {
+const ProtectedRoute = ({ children, allowedRoles, allowedDepartments }) => {
   const { user, profile, loading } = useAuth();
   const location = useLocation();
 
@@ -30,7 +30,22 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
   }
 
   // Check permissions using the database role
-  if (allowedRoles && !canAccess(profile.role, allowedRoles)) {
+  let hasAccess = false;
+  
+  if (!allowedRoles || allowedRoles.length === 0) {
+    hasAccess = true;
+  } else if (allowedRoles && canAccess(profile.role, allowedRoles)) {
+    hasAccess = true;
+  }
+  
+  if (!hasAccess && allowedDepartments && profile.departments) {
+    const deptName = profile.departments.name?.toLowerCase() || '';
+    if (allowedDepartments.some(d => deptName.includes(d))) {
+      hasAccess = true;
+    }
+  }
+
+  if (!hasAccess && (allowedRoles || allowedDepartments)) {
     // If they can't access this specific dashboard, send them to THEIR dashboard
     return <Navigate to={getDashboardRoute(profile.role)} replace />;
   }
