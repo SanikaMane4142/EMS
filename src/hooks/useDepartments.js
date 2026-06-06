@@ -14,3 +14,4 @@ export const useDepartmentStats = () => {
     queryFn: () => departmentService.getDepartmentStats(),
   });
 };
+
