@@ -1044,6 +1044,18 @@ const TaskWorkspace = ({ activeTask, allTasks, onTaskSelect, onBack, onAddTask, 
               </div>
             </div>
 
+            {activeTask.description && (
+              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm flex flex-col gap-2">
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="w-1.5 h-4 bg-pink-500 rounded-full" />
+                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Task Context</h3>
+                </div>
+                <p className="text-sm font-medium text-slate-700 leading-relaxed whitespace-pre-wrap pl-3 border-l-2 border-slate-50">
+                  {activeTask.description}
+                </p>
+              </div>
+            )}
+
             <div className="flex flex-col gap-3.5">
               <div className="flex items-center justify-between px-1">
                 <h3 className="text-sm font-bold text-slate-900 tracking-tight">Task Breakdown</h3>
@@ -1728,12 +1740,14 @@ const MyTasks = () => {
   const handleCreateTask = async (payload) => {
     try {
       if (payload.id) {
+        // 1. Update the existing task with the first selected assignee
+        const firstAssignee = payload.assignedTo[0];
         await updateTask.mutateAsync({
           taskId: payload.id,
           updates: {
             title: payload.title,
             project_name: payload.projectName,
-            assigned_to: payload.assignedTo,
+            assigned_to: firstAssignee,
             deadline: payload.deadline,
             priority: payload.priority,
             description: payload.description
@@ -1741,20 +1755,44 @@ const MyTasks = () => {
           actorId: user.id,
           actionType: 'updated'
         });
+
+        // 2. If multiple candidates were selected during Edit, clone the task for the rest
+        if (payload.assignedTo.length > 1) {
+          const additionalAssignees = payload.assignedTo.slice(1);
+          await Promise.all(additionalAssignees.map(async (assigneeId) => {
+            // Delete the 'id' so it creates a new task
+            const { id, ...newPayload } = payload;
+            await createTask.mutateAsync({ ...newPayload, assignedTo: assigneeId });
+            if (assigneeId !== user.id) {
+              try {
+                await notificationService.notifyUser?.(
+                  assigneeId,
+                  'New Task Assigned',
+                  `${profile?.full_name || 'Someone'} assigned you: "${payload.title}"`,
+                  'task',
+                  '/my-tasks'
+                );
+              } catch (_) { }
+            }
+          }));
+        }
+
         setEditingTask(null);
       } else {
-        await createTask.mutateAsync(payload);
-        if (payload.assignedTo !== user.id) {
-          try {
-            await notificationService.notifyUser?.(
-              payload.assignedTo,
-              'New Task Assigned',
-              `${profile?.full_name || 'Someone'} assigned you: "${payload.title}"`,
-              'task',
-              '/my-tasks'
-            );
-          } catch (_) { }
-        }
+        await Promise.all(payload.assignedTo.map(async (assigneeId) => {
+          await createTask.mutateAsync({ ...payload, assignedTo: assigneeId });
+          if (assigneeId !== user.id) {
+            try {
+              await notificationService.notifyUser?.(
+                assigneeId,
+                'New Task Assigned',
+                `${profile?.full_name || 'Someone'} assigned you: "${payload.title}"`,
+                'task',
+                '/my-tasks'
+              );
+            } catch (_) { }
+          }
+        }));
       }
       setModalOpen(false);
     } catch (err) {

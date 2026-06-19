@@ -29,7 +29,7 @@ const CreateTaskModal = ({ open, onClose, onCreate, initialData = null, isSubmit
   const [formData, setFormData] = useState({
     title: "",
     projectName: "",
-    assignedTo: "",
+    assignedTo: [],
     deadline: "",
     priority: "Medium",
     description: "",
@@ -42,7 +42,7 @@ const CreateTaskModal = ({ open, onClose, onCreate, initialData = null, isSubmit
       setFormData({
         title: initialData.title || "",
         projectName: initialData.project_name || "",
-        assignedTo: initialData.assigned_to || "",
+        assignedTo: initialData.assigned_to ? [initialData.assigned_to] : [],
         deadline: initialData.deadline || "",
         priority: initialData.priority || "Medium",
         description: initialData.description || "",
@@ -65,13 +65,17 @@ const CreateTaskModal = ({ open, onClose, onCreate, initialData = null, isSubmit
   const set = (field) => (val) => setFormData((prev) => ({ ...prev, [field]: val }));
 
   const handleSelectSelf = () => {
-    set("assignedTo")(user.id);
+    set("assignedTo")([user.id]);
     setStep(1);
   };
 
-  const handleSelectEmployee = (empId) => {
-    set("assignedTo")(empId);
-    setStep(1);
+  const toggleEmployee = (empId) => {
+    setFormData(prev => ({
+      ...prev,
+      assignedTo: prev.assignedTo.includes(empId)
+        ? prev.assignedTo.filter(id => id !== empId)
+        : [...prev.assignedTo, empId]
+    }));
   };
 
   const addSubtask = () => {
@@ -93,7 +97,7 @@ const CreateTaskModal = ({ open, onClose, onCreate, initialData = null, isSubmit
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!formData.title.trim() || !formData.assignedTo) return;
+    if (!formData.title.trim() || formData.assignedTo.length === 0) return;
     onCreate({
       ...formData,
       id: initialData?.id, // Pass ID if editing
@@ -110,7 +114,7 @@ const CreateTaskModal = ({ open, onClose, onCreate, initialData = null, isSubmit
     setFormData({
       title: "",
       projectName: "",
-      assignedTo: "",
+      assignedTo: [],
       deadline: "",
       priority: "Medium",
       description: "",
@@ -120,8 +124,7 @@ const CreateTaskModal = ({ open, onClose, onCreate, initialData = null, isSubmit
     onClose();
   };
 
-  const isSelf = formData.assignedTo === user?.id;
-  const selectedEmployee = employees.find(e => e.id === formData.assignedTo);
+  const isSelf = formData.assignedTo.length === 1 && formData.assignedTo[0] === user?.id;
 
   return (
     <Modal
@@ -229,30 +232,41 @@ const CreateTaskModal = ({ open, onClose, onCreate, initialData = null, isSubmit
                         <span className="text-sm font-bold text-slate-400 italic">Syncing Team Directory...</span>
                       </div>
                     ) : filteredEmployees.length > 0 ? (
-                      filteredEmployees.map((emp) => (
-                        <button
-                          key={emp.id}
-                          onClick={() => handleSelectEmployee(emp.id)}
-                          className="flex items-center gap-4 p-4 rounded-2xl border border-transparent hover:border-indigo-100 hover:bg-indigo-50/50 transition-all group/emp"
-                        >
-                          <Avatar 
-                            src={emp.avatar_url} 
-                            sx={{ width: 48, height: 48 }}
-                            className="shadow-sm border-2 border-white group-hover/emp:border-indigo-200 transition-all"
+                      filteredEmployees.map((emp) => {
+                        const isSelected = formData.assignedTo.includes(emp.id);
+                        return (
+                          <button
+                            key={emp.id}
+                            onClick={() => toggleEmployee(emp.id)}
+                            className={`flex items-center gap-4 p-4 rounded-2xl border transition-all group/emp ${
+                              isSelected 
+                                ? "border-indigo-500 bg-indigo-50/50 shadow-sm" 
+                                : "border-transparent hover:border-indigo-100 hover:bg-indigo-50/50"
+                            }`}
                           >
-                            {emp.full_name?.charAt(0)}
-                          </Avatar>
-                          <div className="flex-1 text-left">
-                            <div className="text-sm font-black text-slate-900 group-hover/emp:text-indigo-600 transition-colors">
-                              {emp.full_name}
+                            <Avatar 
+                              src={emp.avatar_url} 
+                              sx={{ width: 48, height: 48 }}
+                              className={`shadow-sm border-2 transition-all ${isSelected ? "border-indigo-500" : "border-white group-hover/emp:border-indigo-200"}`}
+                            >
+                              {emp.full_name?.charAt(0)}
+                            </Avatar>
+                            <div className="flex-1 text-left">
+                              <div className={`text-sm font-black transition-colors ${isSelected ? "text-indigo-700" : "text-slate-900 group-hover/emp:text-indigo-600"}`}>
+                                {emp.full_name}
+                              </div>
+                              <div className={`text-[10px] font-bold flex items-center gap-2 ${isSelected ? "text-indigo-500" : "text-slate-400"}`}>
+                                {emp.employee_id} • {emp.departments?.name || "Global"}
+                              </div>
                             </div>
-                            <div className="text-[10px] font-bold text-slate-400 flex items-center gap-2">
-                              {emp.employee_id} • {emp.departments?.name || "Global"}
-                            </div>
-                          </div>
-                          <ChevronRight size={16} className="text-slate-300 group-hover/emp:translate-x-1 group-hover/emp:text-indigo-400 transition-all" />
-                        </button>
-                      ))
+                            {isSelected ? (
+                              <CheckCircle2 size={20} className="text-indigo-600" />
+                            ) : (
+                              <ChevronRight size={16} className="text-slate-300 group-hover/emp:translate-x-1 group-hover/emp:text-indigo-400 transition-all" />
+                            )}
+                          </button>
+                        );
+                      })
                     ) : (
                       <div className="flex flex-col items-center justify-center py-12 text-center opacity-50">
                         <Search size={40} className="text-slate-300 mb-2" />
@@ -260,6 +274,17 @@ const CreateTaskModal = ({ open, onClose, onCreate, initialData = null, isSubmit
                       </div>
                     )}
                   </div>
+                  {formData.assignedTo.length > 0 && !isSelf && (
+                    <div className="pt-4 border-t border-slate-100">
+                      <button
+                        onClick={() => setStep(1)}
+                        className="w-full py-4 rounded-2xl bg-indigo-600 text-white font-black transition-all tracking-widest text-[10px] uppercase shadow-xl shadow-indigo-200 hover:shadow-indigo-300 hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-3"
+                      >
+                        Continue with {formData.assignedTo.length} {formData.assignedTo.length === 1 ? 'Teammate' : 'Teammates'}
+                        <ChevronRight size={16} />
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (
@@ -272,7 +297,16 @@ const CreateTaskModal = ({ open, onClose, onCreate, initialData = null, isSubmit
                   </div>
                   <div className="flex-1">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Assigned To</p>
-                    <p className="text-sm font-bold text-slate-900">{isSelf ? "Myself" : selectedEmployee?.full_name}</p>
+                    <p className="text-sm font-bold text-slate-900 truncate">
+                      {isSelf 
+                        ? "Myself" 
+                        : formData.assignedTo.length > 0 
+                          ? formData.assignedTo
+                              .map(id => employees.find(e => e.id === id)?.full_name)
+                              .filter(Boolean)
+                              .join(', ')
+                          : "Unassigned"}
+                    </p>
                   </div>
                   <button 
                     type="button"
