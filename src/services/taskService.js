@@ -168,22 +168,14 @@ export const taskService = {
 
     if (taskError) throw taskError;
 
-    // 2. If we have subtasks, create a default group and the subtasks
+    // 2. Create the checklist items as Task Groups so assignees can add their own mini tasks under them
     if (subtasks && subtasks.length > 0) {
-      const { data: group, error: groupError } = await supabase
-        .from('task_groups')
-        .insert({ task_id: task.id, title: 'Checklist', sort_order: 0 })
-        .select()
-        .single();
-
-      if (!groupError && group) {
-        const subtaskPayloads = subtasks.map((st, idx) => ({
-          group_id: group.id,
-          title: st,
-          sort_order: idx,
-        }));
-        await supabase.from('subtasks').insert(subtaskPayloads);
-      }
+      const groupPayloads = subtasks.map((st, idx) => ({
+        task_id: task.id,
+        title: st,
+        sort_order: idx,
+      }));
+      await supabase.from('task_groups').insert(groupPayloads);
     }
 
     // Return the task (re-fetch to get nested subtasks if they were created)

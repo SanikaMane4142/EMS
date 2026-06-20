@@ -1740,17 +1740,40 @@ const MyTasks = () => {
   const handleCreateTask = async (payload) => {
     try {
       if (payload.id) {
+        // Extract existing task structure to clone them if we are assigning to new people
+        let existingSubtasks = [];
+        if (editingTask?.task_groups) {
+          editingTask.task_groups.forEach(group => {
+            if (!group.is_deleted) {
+              if (group.title === 'Checklist' && group.subtasks) {
+                // Legacy support: if it's the old 'Checklist' group, clone its subtasks
+                group.subtasks.forEach(st => {
+                  if (!st.is_deleted) {
+                    existingSubtasks.push(st.title);
+                  }
+                });
+              } else {
+                // New behavior: clone the task group itself
+                existingSubtasks.push(group.title);
+              }
+            }
+          });
+        }
+        
+        // Combine with any new subtasks added in the edit form (if any)
+        const allSubtasksToClone = [...existingSubtasks, ...(payload.subtasks || [])];
+
         // 1. Update the existing task with the first selected assignee
         const firstAssignee = payload.assignedTo[0];
         await updateTask.mutateAsync({
           taskId: payload.id,
           updates: {
             title: payload.title,
-            project_name: payload.projectName,
+            project_name: payload.projectName || null,
             assigned_to: firstAssignee,
-            deadline: payload.deadline,
+            deadline: payload.deadline || null,
             priority: payload.priority,
-            description: payload.description
+            description: payload.description || null
           },
           actorId: user.id,
           actionType: 'updated'
@@ -1762,7 +1785,11 @@ const MyTasks = () => {
           await Promise.all(additionalAssignees.map(async (assigneeId) => {
             // Delete the 'id' so it creates a new task
             const { id, ...newPayload } = payload;
-            await createTask.mutateAsync({ ...newPayload, assignedTo: assigneeId });
+            await createTask.mutateAsync({ 
+              ...newPayload, 
+              assignedTo: assigneeId,
+              subtasks: allSubtasksToClone 
+            });
             if (assigneeId !== user.id) {
               try {
                 await notificationService.notifyUser?.(
