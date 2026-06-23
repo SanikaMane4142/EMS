@@ -68,7 +68,8 @@ BEGIN
     IF v_att.punch_out_time IS NULL THEN
       v_new_status := 'punched_in';
     ELSE
-      IF COALESCE(v_att.total_hours, 0) > 8 THEN
+      -- Check if they were auto-punched-out (either by current status, or if total_hours > 9)
+      IF v_att.status = 'auto_punched_out' OR COALESCE(v_att.total_hours, 0) > 9 THEN
         v_new_status := 'auto_punched_out';
       ELSE
         v_new_status := 'punched_out';

@@ -59,8 +59,8 @@ const calcElapsedMs = (rec, clockDrift = 0) => {
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const SHIFT_MS = 8 * 60 * 60 * 1000;       // 8 hours    — regular paid hours
-const AUTO_PUNCH_OUT_MS = 8.5 * 60 * 60 * 1000;     // 8h 30m     — auto punch-out trigger
+const SHIFT_MS = 9 * 60 * 60 * 1000;       // 9 hours    — regular paid hours
+const AUTO_PUNCH_OUT_MS = 9.5 * 60 * 60 * 1000;     // 9h 30m     — auto punch-out trigger
 const HALF_DAY_MS = 4 * 60 * 60 * 1000;       // 4 hours    — minimum for half-day
 const LUNCH_LIMIT_MS = 60 * 60 * 1000;            // 1 hour     — lunch break limit
 
@@ -271,7 +271,7 @@ const EmployeeDashboard = () => {
     return () => stopTimer();
   }, [record, clockDrift]);
 
-  // ── Auto Punch-Out at 8h 30m ────────────────────────────────────────────────
+  // ── Auto Punch-Out at 9h 30m ────────────────────────────────────────────────
   // Watches elapsed time; fires once when it crosses AUTO_PUNCH_OUT_MS
   useEffect(() => {
     if (
@@ -280,7 +280,7 @@ const EmployeeDashboard = () => {
       elapsedMs >= AUTO_PUNCH_OUT_MS
     ) {
       autoPunchOutFiredRef.current = true;
-      console.log('[Attendance] Auto punch-out triggered at 8h30m');
+      console.log('[Attendance] Auto punch-out triggered at 9h30m');
 
       // Silently punch out — no confirmation dialog for auto punch-out
       punchOutMutation.mutateAsync({
@@ -300,12 +300,12 @@ const EmployeeDashboard = () => {
   const isPunchedIn = record?.status === 'punched_in' && record?.punch_in_time != null;
   const isCompleted = record?.status === 'punched_out' || record?.status === 'auto_punched_out';
   const isLunchBreak = record?.lunch_start_time != null && !record?.lunch_end_time;
-  // 8h reached = regular shift complete (used for overtime card visibility)
+  // 9h reached = regular shift complete (used for overtime card visibility)
   const isShiftComplete = elapsedMs >= SHIFT_MS;
   const isHalfDayComplete = elapsedMs >= HALF_DAY_MS;
   const remainingMs = Math.max(0, SHIFT_MS - elapsedMs);
   const isLunchExceeded = isLunchBreak && lunchElapsedMs >= LUNCH_LIMIT_MS;
-  // Overtime card: only visible after the shift has been punched out AND 8h were worked
+  // Overtime card: only visible after the shift has been punched out AND 9h were worked
   const showOvertimeCard = isCompleted && isShiftComplete;
 
 
@@ -857,7 +857,7 @@ const EmployeeDashboard = () => {
                   )}
                 </div>
 
-                {/* Sub-label: shows auto punch-out countdown when nearing 8h30m */}
+                {/* Sub-label: shows auto punch-out countdown when nearing 9h30m */}
                 {isPunchedIn && elapsedMs >= SHIFT_MS && elapsedMs < AUTO_PUNCH_OUT_MS && (
                   <p className="text-[11px] font-bold text-amber-600 mb-3 flex items-center gap-1">
                     ⚡ Auto punch-out in {formatMs(AUTO_PUNCH_OUT_MS - elapsedMs)}
@@ -885,7 +885,7 @@ const EmployeeDashboard = () => {
                         <CheckCircle size={18} className="text-blue-500" />
                         <span className="text-sm font-bold text-blue-700">
                           {record?.status === 'auto_punched_out'
-                            ? `Auto closed · 8h paid · ${formatMs(elapsedMs)} logged`
+                            ? `Auto closed · 9h paid · ${formatMs(elapsedMs)} logged`
                             : `Shift ended · ${formatMs(elapsedMs)} logged`
                           }
                         </span>
@@ -965,7 +965,7 @@ const EmployeeDashboard = () => {
               </div>
             </div>
 
-            {/* Card 1b: Overtime Slot — only visible after punch-out when 8h worked */}
+            {/* Card 1b: Overtime Slot — only visible after punch-out when 9h worked */}
             {showOvertimeCard && (
               <div className="relative overflow-hidden min-h-[220px]">
                 <div className="card-ems-static h-full p-6 border-l-[6px] border-indigo-500 animate-in fade-in zoom-in duration-500" style={{ borderRadius: '18px' }}>

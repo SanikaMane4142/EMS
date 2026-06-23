@@ -1095,7 +1095,7 @@ BEGIN
     UPDATE public.attendance
     SET
         punch_out_time      = now(),
-        total_hours         = LEAST(v_total_hours, 8),   -- Cap regular hours at 8
+        total_hours         = LEAST(v_total_hours, 9),   -- Cap regular hours at 9
         status              = 'punched_out',
         lunch_duration_ms   = COALESCE(p_lunch_duration_ms, lunch_duration_ms, 0),
         validation_method   = v_validation_method
@@ -1297,7 +1297,7 @@ BEGIN
 
     -- 10. Determine approved/payable hours
     IF p_mark_full_day THEN
-        v_approved_hours := 8.00;
+        v_approved_hours := 9.00;
     ELSE
         v_approved_hours := v_actual_hours;
     END IF;
@@ -1306,7 +1306,7 @@ BEGIN
     UPDATE public.attendance
     SET
         punch_out_time          = v_punch_out_time,
-        total_hours             = LEAST(v_actual_hours, 8),
+        total_hours             = LEAST(v_actual_hours, 9),
         status                  = 'punched_out',
         is_force_punched_out    = TRUE,
         force_punch_out_by      = v_caller_id,
@@ -1524,7 +1524,7 @@ BEGIN
 
     -- 8. Determine approved/payable hours
     IF COALESCE(v_request.approved_full_day, FALSE) THEN
-        v_approved_hours := 8.00;
+        v_approved_hours := 9.00;
     ELSE
         v_approved_hours := v_actual_hours;
     END IF;
@@ -1533,7 +1533,7 @@ BEGIN
     UPDATE public.attendance
     SET
         punch_out_time          = v_punch_out_time,
-        total_hours             = LEAST(v_actual_hours, 8),
+        total_hours             = LEAST(v_actual_hours, 9),
         status                  = 'punched_out',
         is_force_punched_out    = TRUE,
         force_punch_out_by      = v_request.reviewer_id, -- HR who approved it
@@ -2219,7 +2219,8 @@ BEGIN
     IF v_att.punch_out_time IS NULL THEN
       v_new_status := 'punched_in';
     ELSE
-      IF COALESCE(v_att.total_hours, 0) > 8 THEN
+      -- Check if they were auto-punched-out (either by current status, or if total_hours > 9)
+      IF v_att.status = 'auto_punched_out' OR COALESCE(v_att.total_hours, 0) > 9 THEN
         v_new_status := 'auto_punched_out';
       ELSE
         v_new_status := 'punched_out';

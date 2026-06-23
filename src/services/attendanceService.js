@@ -83,9 +83,9 @@ export const attendanceService = {
   /**
    * Punch Out — updates the record and calculates total hours.
    *
-   * When isAutoPunchOut = true (triggered at 8h30m by the frontend timer):
-   *   - punch_out_time is set to exactly punch_in_time + 8h30m
-   *   - total_hours is capped at 8 (regular paid hours)
+   * When isAutoPunchOut = true (triggered at 9h30m by the frontend timer):
+   *   - punch_out_time is set to exactly punch_in_time + 9h30m
+   *   - total_hours is capped at 9 (regular paid hours)
    *   - status is set to 'auto_punched_out'
    *
    * Otherwise the existing RPC handles the standard manual punch-out.
@@ -93,15 +93,15 @@ export const attendanceService = {
   async punchOut(recordId, punchInTime, lunchDurationMs = 0, isAutoPunchOut = false) {
     if (!isAutoPunchOut) validateDevice();
     if (isAutoPunchOut) {
-      // Auto punch-out: punch_out_time = punch_in_time + 8h30m, total_hours = 8
-      const AUTO_SHIFT_MS = 8.5 * 60 * 60 * 1000; // 8h30m in ms
+      // Auto punch-out: punch_out_time = punch_in_time + 9h30m, total_hours = 9
+      const AUTO_SHIFT_MS = 9.5 * 60 * 60 * 1000; // 9h30m in ms
       const punchOutTime = new Date(new Date(punchInTime).getTime() + AUTO_SHIFT_MS);
 
       const { data, error } = await supabase
         .from('attendance')
         .update({
           punch_out_time: punchOutTime.toISOString(),
-          total_hours: 8,          // Regular paid hours only — NOT 8.5
+          total_hours: 9,          // Regular paid hours only — NOT 9.5
           status: 'auto_punched_out',
         })
         .eq('id', recordId)
@@ -109,7 +109,7 @@ export const attendanceService = {
         .single();
 
       if (error) throw error;
-      console.log('[Attendance] Auto punch-out complete. punch_out_time:', punchOutTime.toISOString(), '| total_hours: 8');
+      console.log('[Attendance] Auto punch-out complete. punch_out_time:', punchOutTime.toISOString(), '| total_hours: 9');
       return data;
     }
 
