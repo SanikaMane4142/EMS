@@ -90,18 +90,18 @@ export const attendanceService = {
    *
    * Otherwise the existing RPC handles the standard manual punch-out.
    */
-  async punchOut(recordId, punchInTime, lunchDurationMs = 0, isAutoPunchOut = false) {
+  async punchOut(recordId, punchInTime, lunchDurationMs = 0, isAutoPunchOut = false, shiftHours = 9) {
     if (!isAutoPunchOut) validateDevice();
     if (isAutoPunchOut) {
-      // Auto punch-out: punch_out_time = punch_in_time + 9h30m, total_hours = 9
-      const AUTO_SHIFT_MS = 9.5 * 60 * 60 * 1000; // 9h30m in ms
+      // Auto punch-out: punch_out_time = punch_in_time + (shiftHours + 0.5)h
+      const AUTO_SHIFT_MS = (shiftHours + 0.5) * 60 * 60 * 1000;
       const punchOutTime = new Date(new Date(punchInTime).getTime() + AUTO_SHIFT_MS);
 
       const { data, error } = await supabase
         .from('attendance')
         .update({
           punch_out_time: punchOutTime.toISOString(),
-          total_hours: 9,          // Regular paid hours only — NOT 9.5
+          total_hours: shiftHours,
           status: 'auto_punched_out',
         })
         .eq('id', recordId)
@@ -109,7 +109,7 @@ export const attendanceService = {
         .single();
 
       if (error) throw error;
-      console.log('[Attendance] Auto punch-out complete. punch_out_time:', punchOutTime.toISOString(), '| total_hours: 9');
+      console.log(`[Attendance] Auto punch-out complete. punch_out_time: ${punchOutTime.toISOString()} | total_hours: ${shiftHours}`);
       return data;
     }
 

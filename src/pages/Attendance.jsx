@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { utils, writeFile, write } from 'xlsx';
 import PageHeader from '../components/PageHeader';
+import { getShiftConfig } from '../utils/shiftConfig';
 import {
   useAttendanceOverview, usePendingAbsenceExplanations, useReviewAbsenceExplanation,
   useAuthorizedEarlyPunchOut, useOverrideLogs,
@@ -145,7 +146,7 @@ const Attendance = () => {
 
     const result = await Swal.fire({
       title: 'Confirm Early Punch-Out',
-      html: `<p style="font-size:14px;color:#475569;">You are about to punch out <b>${punchOutModal.row?.name}</b> early. Exact punch-out time will be saved. ${punchOutForm.markFullDay ? '<br/><b>Full-day (9h) approval</b> will affect payable hours.' : 'Payable hours will match actual worked hours.'}</p>`,
+      html: `<p style="font-size:14px;color:#475569;">You are about to punch out <b>${punchOutModal.row?.name}</b> early. Exact punch-out time will be saved. ${punchOutForm.markFullDay ? `<br/><b>Full-day (${getShiftConfig(punchOutModal.row?.empId).shiftHours}h) approval</b> will affect payable hours.` : 'Payable hours will match actual worked hours.'}</p>`,
       icon: 'warning',
       showCancelButton: true,
       confirmButtonColor: '#4f46e5',
@@ -959,7 +960,7 @@ const Attendance = () => {
               />
               <div>
                 <span className="text-sm font-bold text-slate-800 block">Mark as Full Day</span>
-                 <span className="text-xs font-medium text-slate-500">Employee gets 9h credit (Approved leave early)</span>
+                 <span className="text-xs font-medium text-slate-500">Employee gets {getShiftConfig(reviewEarlyExitModal.request?.employee?.employee_id).shiftHours}h credit (Approved leave early)</span>
               </div>
             </label>
 

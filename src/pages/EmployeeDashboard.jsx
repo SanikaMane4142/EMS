@@ -22,6 +22,7 @@ import { taskService } from '../services/taskService';
 import { communicationService } from '../services/communicationService';
 import { employeeService } from '../services/employeeService';
 import { supabase } from '../lib/supabaseClient';
+import { getShiftConfig } from '../utils/shiftConfig';
 
 // New Components
 import CelebrationCard from '../components/CelebrationCard';
@@ -59,8 +60,7 @@ const calcElapsedMs = (rec, clockDrift = 0) => {
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const SHIFT_MS = 9 * 60 * 60 * 1000;       // 9 hours    — regular paid hours
-const AUTO_PUNCH_OUT_MS = 9.5 * 60 * 60 * 1000;     // 9h 30m     — auto punch-out trigger
+// Shift duration is computed dynamically in the component using getShiftConfig
 const HALF_DAY_MS = 4 * 60 * 60 * 1000;       // 4 hours    — minimum for half-day
 const LUNCH_LIMIT_MS = 60 * 60 * 1000;            // 1 hour     — lunch break limit
 
@@ -90,6 +90,8 @@ const EmployeeDashboard = () => {
   const { user, profile, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const isMobile = useMediaQuery('(max-width:767px)');
+
+  const { shiftHours, SHIFT_MS, AUTO_PUNCH_OUT_MS } = getShiftConfig(profile?.employee_id);
 
   // ── Queries & Mutations ───────────────────────────────────────────────────
   const { data: record, isLoading: attendanceLoading } = useActiveAttendance(user?.id);
@@ -280,7 +282,7 @@ const EmployeeDashboard = () => {
       elapsedMs >= AUTO_PUNCH_OUT_MS
     ) {
       autoPunchOutFiredRef.current = true;
-      console.log('[Attendance] Auto punch-out triggered at 9h30m');
+      console.log(`[Attendance] Auto punch-out triggered at ${shiftHours}h30m`);
 
       // Silently punch out — no confirmation dialog for auto punch-out
       punchOutMutation.mutateAsync({
@@ -288,6 +290,7 @@ const EmployeeDashboard = () => {
         punchInTime: record.punch_in_time,
         lunchDurationMs: record.lunch_duration_ms || 0,
         isAutoPunchOut: true,
+        shiftHours, // pass shiftHours dynamically
       }).catch((err) => {
         console.error('[Attendance] Auto punch-out failed:', err.message);
         autoPunchOutFiredRef.current = false; // allow retry on next tick
@@ -885,7 +888,7 @@ const EmployeeDashboard = () => {
                         <CheckCircle size={18} className="text-blue-500" />
                         <span className="text-sm font-bold text-blue-700">
                           {record?.status === 'auto_punched_out'
-                            ? `Auto closed · 9h paid · ${formatMs(elapsedMs)} logged`
+                            ? `Auto closed · ${shiftHours}h paid · ${formatMs(elapsedMs)} logged`
                             : `Shift ended · ${formatMs(elapsedMs)} logged`
                           }
                         </span>
