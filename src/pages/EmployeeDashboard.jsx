@@ -337,6 +337,27 @@ const EmployeeDashboard = () => {
   const startOvertimeMutation = useStartOvertime();
   const endOvertimeMutation = useEndOvertime();
   const handlePunchIn = async () => {
+    const result = await Swal.fire({
+      title: 'Ready to Punch In?',
+      text: 'You are about to start your shift for today. This will start tracking your work hours.',
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonColor: '#10b981', // Emerald green to represent starting/success
+      cancelButtonColor: '#64748b',
+      confirmButtonText: 'Yes, Punch In',
+      cancelButtonText: 'Cancel',
+      background: '#ffffff',
+      borderRadius: '24px',
+      customClass: {
+        title: 'text-xl font-black text-slate-900',
+        htmlContainer: 'text-sm font-medium text-slate-500',
+        confirmButton: 'rounded-xl px-6 py-3 text-sm font-bold',
+        cancelButton: 'rounded-xl px-6 py-3 text-sm font-bold'
+      }
+    });
+
+    if (!result.isConfirmed) return;
+
     try {
       setActionLoading(true);
       await punchInMutation.mutateAsync(user.id);
@@ -482,6 +503,28 @@ const EmployeeDashboard = () => {
 
   const handleStartOvertime = async () => {
     if (!record?.id) return;
+
+    const result = await Swal.fire({
+      title: 'Start Overtime?',
+      text: 'Are you sure you want to start tracking overtime for today?',
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonColor: '#4f46e5',
+      cancelButtonColor: '#64748b',
+      confirmButtonText: 'Yes, Start Overtime',
+      cancelButtonText: 'Cancel',
+      background: '#ffffff',
+      borderRadius: '24px',
+      customClass: {
+        title: 'text-xl font-black text-slate-900',
+        htmlContainer: 'text-sm font-medium text-slate-500',
+        confirmButton: 'rounded-xl px-6 py-3 text-sm font-bold',
+        cancelButton: 'rounded-xl px-6 py-3 text-sm font-bold'
+      }
+    });
+
+    if (!result.isConfirmed) return;
+
     try {
       setActionLoading(true);
       await startOvertimeMutation.mutateAsync(record.id);
@@ -504,6 +547,28 @@ const EmployeeDashboard = () => {
 
   const handleEndOvertime = async () => {
     if (!record?.id || !record?.overtime_start_time) return;
+
+    const result = await Swal.fire({
+      title: 'End Overtime?',
+      text: 'Are you sure you want to end your overtime session for today?',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#ef4444',
+      cancelButtonColor: '#64748b',
+      confirmButtonText: 'Yes, End Overtime',
+      cancelButtonText: 'Cancel',
+      background: '#ffffff',
+      borderRadius: '24px',
+      customClass: {
+        title: 'text-xl font-black text-slate-900',
+        htmlContainer: 'text-sm font-medium text-slate-500',
+        confirmButton: 'rounded-xl px-6 py-3 text-sm font-bold',
+        cancelButton: 'rounded-xl px-6 py-3 text-sm font-bold'
+      }
+    });
+
+    if (!result.isConfirmed) return;
+
     try {
       setActionLoading(true);
       await endOvertimeMutation.mutateAsync({

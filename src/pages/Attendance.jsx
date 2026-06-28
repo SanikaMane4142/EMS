@@ -59,6 +59,17 @@ const getDurationString = (row, nowTick) => {
 };
 
 
+const formatOvertimeMs = (ms) => {
+  if (!ms || ms <= 0) return null;
+  if (ms < 60000) {
+    return `${Math.round(ms / 1000)}s`;
+  }
+  if (ms < 3600000) {
+    return `${Math.round(ms / 60000)}m`;
+  }
+  return `${parseFloat((ms / 3600000).toFixed(2))}h`;
+};
+
 // --- Styled Components / Constants ---
 const STATUS_CONFIG = {
   'Present': { color: '#10b981', bg: '#ecfdf5', label: 'Present', icon: UserCheck },
@@ -617,11 +628,40 @@ const Attendance = () => {
 
                     {/* Overtime */}
                     <td className="px-6 py-5 text-center">
-                      {row.overtime > 0 ? (
-                        <div className="inline-flex flex-col items-center">
-                          <span className="text-[11px] font-black text-emerald-600">+{row.overtime}h</span>
-                          <span className="text-[8px] font-bold text-emerald-400 uppercase tracking-tighter">Overtime</span>
-                        </div>
+                      {row.overtime_start_time && !row.overtime_end_time ? (
+                        <Tooltip
+                          title={
+                            <div className="p-1.5 text-xs space-y-1">
+                              <p className="font-bold border-b border-white/20 pb-0.5 mb-1">Overtime Session</p>
+                              <p>Start: {new Date(row.overtime_start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                              <p>End: <b>Active</b></p>
+                            </div>
+                          }
+                          arrow
+                          placement="top"
+                        >
+                          <div className="inline-flex flex-col items-center cursor-help animate-pulse">
+                            <span className="text-[11px] font-black text-indigo-600">Active</span>
+                            <span className="text-[8px] font-bold text-indigo-400 uppercase tracking-tighter">Overtime</span>
+                          </div>
+                        </Tooltip>
+                      ) : row.overtime_duration_ms > 0 ? (
+                        <Tooltip
+                          title={
+                            <div className="p-1.5 text-xs space-y-1">
+                              <p className="font-bold border-b border-white/20 pb-0.5 mb-1">Overtime Session</p>
+                              <p>Start: {row.overtime_start_time ? new Date(row.overtime_start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</p>
+                              <p>End: {row.overtime_end_time ? new Date(row.overtime_end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</p>
+                            </div>
+                          }
+                          arrow
+                          placement="top"
+                        >
+                          <div className="inline-flex flex-col items-center cursor-help">
+                            <span className="text-[11px] font-black text-emerald-600">+{formatOvertimeMs(row.overtime_duration_ms)}</span>
+                            <span className="text-[8px] font-bold text-emerald-400 uppercase tracking-tighter">Overtime</span>
+                          </div>
+                        </Tooltip>
                       ) : (
                         <span className="text-slate-200 text-xs">--</span>
                       )}
